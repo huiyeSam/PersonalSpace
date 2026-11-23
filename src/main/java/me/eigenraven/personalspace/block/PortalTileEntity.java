@@ -5,17 +5,20 @@ import java.util.Random;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.NetworkManager;
-import net.minecraft.network.Packet;
-import net.minecraft.network.play.server.S35PacketUpdateTileEntity;
+import net.minecraft.network.play.server.SPacketUpdateTileEntity;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.ChatComponentTranslation;
-import net.minecraft.util.MathHelper;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.ITickable;
 import net.minecraft.world.WorldServer;
 import net.minecraftforge.common.DimensionManager;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraft.util.EnumFacing;
 import net.minecraftforge.event.world.BlockEvent;
 
+import me.eigenraven.personalspace.CommonProxy;
+import me.eigenraven.personalspace.DebugLog;
 import me.eigenraven.personalspace.PersonalSpaceMod;
 import me.eigenraven.personalspace.config.Config;
 import me.eigenraven.personalspace.net.Packets;
@@ -23,9 +26,9 @@ import me.eigenraven.personalspace.world.DimensionConfig;
 import me.eigenraven.personalspace.world.PersonalTeleporter;
 import me.eigenraven.personalspace.world.PersonalWorldProvider;
 
-public class PortalTileEntity extends TileEntity {
+public class PortalTileEntity extends TileEntity implements ITickable {
 
-    public static final ForgeDirection DEFAULT_FACING = ForgeDirection.NORTH;
+    public static final EnumFacing DEFAULT_FACING = EnumFacing.NORTH;
 
     // Client-side book animation state (matches TileEntityEnchantmentTable fields)
     public int tickCount;
@@ -40,15 +43,13 @@ public class PortalTileEntity extends TileEntity {
     public int targetPosX = 8;
     public int targetPosY = 8;
     public int targetPosZ = 8;
-    public ForgeDirection targetFacing = DEFAULT_FACING;
-    public ForgeDirection facing = DEFAULT_FACING;
+    public EnumFacing targetFacing = DEFAULT_FACING;
+    public EnumFacing facing = DEFAULT_FACING;
 
     public PortalTileEntity() {}
 
-    @Override
-    public void updateEntity() {
-        super.updateEntity();
-        if (!worldObj.isRemote) return;
+    public void update() {
+        if (getWorld() == null || !getWorld().isRemote) return;
 
         prevPagePosition = pagePosition;
 
@@ -61,9 +62,41 @@ public class PortalTileEntity extends TileEntity {
 
         ++tickCount;
         float delta = (pageTarget - pagePosition) * 0.4F;
-        delta = MathHelper.clamp_float(delta, -0.2F, 0.2F);
+        delta = MathHelper.clamp(delta, -0.2F, 0.2F);
         pageVelocity += (delta - pageVelocity) * 0.9F;
         pagePosition += pageVelocity;
+    }
+
+    public void readLinkFromNBT(NBTTagCompound tag) {
+        if (tag.hasKey("active")) {
+            this.active = tag.getBoolean("active");
+        }
+        if (tag.hasKey("target")) {
+            int[] target = tag.getIntArray("target");
+            if (target.length >= 4) {
+                this.targetDimId = target[0];
+                this.targetPosX = target[1];
+                this.targetPosY = target[2];
+                this.targetPosZ = target[3];
+            }
+        }
+        if (tag.hasKey("facing")) {
+            this.facing = EnumFacing.getFront(tag.getInteger("facing"));
+        }
+        if (tag.hasKey("targetFacing")) {
+            this.targetFacing = EnumFacing.getFront(tag.getInteger("targetFacing"));
+        }
+        if (this.facing == null) this.facing = DEFAULT_FACING;
+        if (this.targetFacing == null) this.targetFacing = DEFAULT_FACING;
+    }
+
+    public NBTTagCompound writeLinkToNBT() {
+        NBTTagCompound tag = new NBTTagCompound();
+        tag.setBoolean("active", this.active);
+        tag.setIntArray("target", new int[] { this.targetDimId, this.targetPosX, this.targetPosY, this.targetPosZ });
+        tag.setInteger("facing", this.facing == null ? DEFAULT_FACING.ordinal() : this.facing.ordinal());
+        tag.setInteger("targetFacing", this.targetFacing == null ? DEFAULT_FACING.ordinal() : this.targetFacing.ordinal());
+        return tag;
     }
 
     @Override
@@ -85,19 +118,29 @@ public class PortalTileEntity extends TileEntity {
         if (tag.hasKey("remotePos")) {
             isLegacy = true;
             int[] pos_array = tag.getIntArray("remotePos");
-            this.targetPosX = pos_array[0];
-            this.targetPosY = pos_array[1];
-            this.targetPosZ = pos_array[2];
+            if (pos_array.length >= 3) {
+                this.targetPosX = pos_array[0];
+                this.targetPosY = pos_array[1];
+                this.targetPosZ = pos_array[2];
+            }
         }
         if (tag.hasKey("remoteDir")) {
             isLegacy = true;
             byte remoteDir = tag.getByte("remoteDir");
-            this.facing = switch (remoteDir) {
-                case 0 -> ForgeDirection.NORTH;
-                case 1 -> ForgeDirection.EAST;
-                case 3 -> ForgeDirection.WEST;
-                default -> ForgeDirection.SOUTH;
-            };
+            switch (remoteDir) {
+                case 0:
+                    this.facing = EnumFacing.NORTH;
+                    break;
+                case 1:
+                    this.facing = EnumFacing.EAST;
+                    break;
+                case 3:
+                    this.facing = EnumFacing.WEST;
+                    break;
+                default:
+                    this.facing = EnumFacing.SOUTH;
+                    break;
+            }
         }
         if (tag.hasKey("localDimensionId")) {
             isLegacy = true;
@@ -111,16 +154,18 @@ public class PortalTileEntity extends TileEntity {
         }
         if (tag.hasKey("target")) {
             int[] t_array = tag.getIntArray("target");
-            this.targetDimId = t_array[0];
-            this.targetPosX = t_array[1];
-            this.targetPosY = t_array[2];
-            this.targetPosZ = t_array[3];
+            if (t_array.length >= 4) {
+                this.targetDimId = t_array[0];
+                this.targetPosX = t_array[1];
+                this.targetPosY = t_array[2];
+                this.targetPosZ = t_array[3];
+            }
         }
         if (tag.hasKey("facing")) {
-            facing = ForgeDirection.getOrientation(tag.getInteger("facing"));
+            facing = EnumFacing.getFront(tag.getInteger("facing"));
         }
         if (tag.hasKey("targetFacing")) {
-            targetFacing = ForgeDirection.getOrientation(tag.getInteger("targetFacing"));
+            targetFacing = EnumFacing.getFront(tag.getInteger("targetFacing"));
         }
 
         if (isLegacy) {
@@ -133,46 +178,72 @@ public class PortalTileEntity extends TileEntity {
                     targetPosZ);
             markDirty();
         }
-        if (facing == ForgeDirection.UNKNOWN) {
-            facing = ForgeDirection.NORTH;
+        if (facing == null) {
+            facing = EnumFacing.NORTH;
         }
     }
 
     @Override
     public void markDirty() {
         super.markDirty();
-        if (worldObj != null) {
-            worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
+        if (getWorld() != null) {
+            getWorld().notifyBlockUpdate(pos, getWorld().getBlockState(pos), getWorld().getBlockState(pos), 3);
         }
     }
 
     @Override
-    public void writeToNBT(NBTTagCompound tag) {
+    public NBTTagCompound writeToNBT(NBTTagCompound tag) {
         super.writeToNBT(tag);
         tag.setBoolean("active", this.active);
         tag.setIntArray("target", new int[] { this.targetDimId, this.targetPosX, this.targetPosY, this.targetPosZ });
         tag.setInteger("facing", this.facing.ordinal());
         tag.setInteger("targetFacing", this.targetFacing.ordinal());
+        return tag;
     }
 
     @Override
-    public Packet getDescriptionPacket() {
+    public SPacketUpdateTileEntity getUpdatePacket() {
         NBTTagCompound tag = new NBTTagCompound();
         writeToNBT(tag);
-        return new S35PacketUpdateTileEntity(xCoord, yCoord, zCoord, 1, tag);
+        return new SPacketUpdateTileEntity(pos, 1, tag);
     }
 
     @Override
-    public void onDataPacket(NetworkManager net, S35PacketUpdateTileEntity pkt) {
-        if (worldObj.isRemote) {
-            readFromNBT(pkt.func_148857_g());
+    public NBTTagCompound getUpdateTag() {
+        NBTTagCompound tag = new NBTTagCompound();
+        writeToNBT(tag);
+        return tag;
+    }
+
+    @Override
+    public void onDataPacket(NetworkManager net, SPacketUpdateTileEntity pkt) {
+        if (getWorld() != null && getWorld().isRemote) {
+            readFromNBT(pkt.getNbtCompound());
             PersonalSpaceMod.proxy.closePortalGui(this);
         }
     }
 
     public void transport(EntityPlayerMP player) {
-        if (worldObj.isRemote || !this.active || player == null) {
+        if (getWorld().isRemote || player == null) return;
+        if (!this.active) {
+            PersonalSpaceMod.LOG.warn("Player {} activated inactive portal at {} in dimension {}",
+                    player.getName(), pos, getWorld().provider.getDimension());
             return;
+        }
+        if (this.targetDimId == getWorld().provider.getDimension()) {
+            PersonalSpaceMod.LOG.error("Portal at {} in dimension {} targets itself; teleport cancelled", pos,
+                    this.targetDimId);
+            return;
+        }
+        DimensionConfig cfg = DimensionConfig.getForDimension(this.targetDimId, false);
+        if (!DimensionManager.isDimensionRegistered(this.targetDimId) && cfg == null
+                && PersonalSpaceMod.INSTANCE != null) {
+            PersonalSpaceMod.INSTANCE.restoreDimensionConfig(this.targetDimId);
+            cfg = DimensionConfig.getForDimension(this.targetDimId, false);
+        }
+        if (!DimensionManager.isDimensionRegistered(this.targetDimId) && cfg != null) {
+            PersonalSpaceMod.LOG.warn("Portal target dimension {} was not registered; restoring it from saved metadata", this.targetDimId);
+            cfg.registerWithDimensionManager(this.targetDimId, false);
         }
         if (!DimensionManager.isDimensionRegistered(this.targetDimId)) {
             PersonalSpaceMod.LOG.warn(
@@ -182,28 +253,55 @@ public class PortalTileEntity extends TileEntity {
             return;
         }
 
-        PersonalTeleporter tp = new PersonalTeleporter(this, (WorldServer) worldObj);
+        WorldServer destination = DimensionManager.getWorld(this.targetDimId);
+        if (destination == null) {
+            DimensionManager.initDimension(this.targetDimId);
+            destination = DimensionManager.getWorld(this.targetDimId);
+        }
+        if (destination == null) {
+            PersonalSpaceMod.LOG.error("Portal target dimension {} failed to initialize for player {}",
+                    this.targetDimId, player.getName());
+            return;
+        }
+        PersonalTeleporter tp;
+        if (this.targetDimId == 0 && getWorld().provider instanceof PersonalWorldProvider) {
+            int[] entry = me.eigenraven.personalspace.world.PersonalReturnData.get(getWorld()).get(player.getUniqueID());
+            BlockPos exit = entry == null ? destination.getSpawnPoint().up() : new BlockPos(entry[0], entry[1], entry[2]);
+            tp = new PersonalTeleporter(destination, exit.getX(), exit.getY(), exit.getZ());
+        } else {
+            // Store each player's overworld entrance in this private dimension's saved data.
+            me.eigenraven.personalspace.world.PersonalReturnData.get(destination)
+                    .set(player.getUniqueID(), MathHelper.floor(player.posX), MathHelper.floor(player.posY),
+                            MathHelper.floor(player.posZ));
+            tp = new PersonalTeleporter(this, destination);
+        }
+        if (cfg != null) {
+            net.minecraft.util.math.BlockPos point = cfg.getTeleportPoint();
+            if (point != null && destination.getBlockState(point).getBlock() == PersonalSpaceMod.BLOCK_TELEPORT_POINT) {
+                tp = new PersonalTeleporter(destination, point.getX(), point.getY() + 1, point.getZ());
+            }
+        }
 
-        player.mcServer.getConfigurationManager().transferPlayerToDimension(player, this.targetDimId, tp);
+        player.mcServer.getPlayerList().transferPlayerToDimension(player, this.targetDimId, tp);
     }
 
     public int getTargetTeleportX() {
-        return targetPosX + targetFacing.offsetX;
+        return targetPosX + targetFacing.getDirectionVec().getX();
     }
 
     public int getTargetTeleportY() {
-        return targetPosY + targetFacing.offsetY;
+        return targetPosY + targetFacing.getDirectionVec().getY();
     }
 
     public int getTargetTeleportZ() {
-        return targetPosZ + targetFacing.offsetZ;
+        return targetPosZ + targetFacing.getDirectionVec().getZ();
     }
 
     public void linkOtherPortal(boolean spawnNewPortal, EntityPlayerMP player) {
         if (!this.active) {
             return;
         }
-        if (worldObj.isRemote) {
+        if (getWorld().isRemote) {
             return;
         }
         WorldServer otherWorld = DimensionManager.getWorld(this.targetDimId);
@@ -220,10 +318,11 @@ public class PortalTileEntity extends TileEntity {
             for (otherY = targetPosY - 1; otherY <= targetPosY + 1; otherY++) {
                 if (otherY < 0 || otherY > otherWorld.getHeight()) continue;
                 for (otherZ = targetPosZ - 1; otherZ <= targetPosZ + 1; otherZ++) {
-                    if (!otherWorld.blockExists(otherX, otherY, otherZ)) {
-                        otherWorld.theChunkProviderServer.loadChunk(otherX >> 4, otherZ >> 4);
+                    BlockPos searchPos = new BlockPos(otherX, otherY, otherZ);
+                    if (!otherWorld.isBlockLoaded(searchPos)) {
+                        otherWorld.getChunkProvider().loadChunk(otherX >> 4, otherZ >> 4);
                     }
-                    if (otherWorld.getBlock(otherX, otherY, otherZ) instanceof PortalBlock) {
+                    if (otherWorld.getBlockState(searchPos).getBlock() instanceof PortalBlock) {
                         break searchloop;
                     }
                 }
@@ -231,8 +330,9 @@ public class PortalTileEntity extends TileEntity {
         }
         PortalTileEntity otherPortal = null;
 
-        if (otherWorld.getBlock(otherX, otherY, otherZ) == PersonalSpaceMod.BLOCK_PORTAL) {
-            TileEntity wte = otherWorld.getTileEntity(otherX, otherY, otherZ);
+        BlockPos otherPos = new BlockPos(otherX, otherY, otherZ);
+        if (otherWorld.getBlockState(otherPos).getBlock() == PersonalSpaceMod.BLOCK_PORTAL) {
+            TileEntity wte = otherWorld.getTileEntity(otherPos);
             if (wte instanceof PortalTileEntity) {
                 otherPortal = (PortalTileEntity) wte;
             }
@@ -240,26 +340,28 @@ public class PortalTileEntity extends TileEntity {
             otherX = targetPosX;
             otherY = targetPosY;
             otherZ = targetPosZ;
-            otherWorld.setBlock(otherX, otherY, otherZ, PersonalSpaceMod.BLOCK_PORTAL, facing.ordinal(), 3);
-            otherPortal = (PortalTileEntity) otherWorld.getTileEntity(otherX, otherY, otherZ);
+            BlockPos spawnPos = new BlockPos(otherX, otherY, otherZ);
+            otherWorld.setBlockState(spawnPos, PersonalSpaceMod.BLOCK_PORTAL.getDefaultState(), 3);
+            TileEntity created = otherWorld.getTileEntity(spawnPos);
+            if (created instanceof PortalTileEntity) otherPortal = (PortalTileEntity) created;
         }
         if (otherPortal != null) {
             otherPortal.active = true;
             DimensionConfig otherPortalDimCfg = DimensionConfig.getForDimension(otherPortal.targetDimId, false);
-            if (otherPortal.targetDimId != worldObj.provider.dimensionId && otherPortalDimCfg != null) {
+            if (otherPortal.targetDimId != getWorld().provider.getDimension() && otherPortalDimCfg != null) {
                 if (player != null) {
-                    player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.relinked.error"));
+                    player.sendMessage(new TextComponentTranslation("chat.personalWorld.relinked.error"));
                 }
                 return;
             }
-            otherPortal.targetDimId = worldObj.provider.dimensionId;
-            otherPortal.targetPosX = xCoord;
-            otherPortal.targetPosY = yCoord;
-            otherPortal.targetPosZ = zCoord;
+            otherPortal.targetDimId = getWorld().provider.getDimension();
+            otherPortal.targetPosX = pos.getX();
+            otherPortal.targetPosY = pos.getY();
+            otherPortal.targetPosZ = pos.getZ();
             otherPortal.targetFacing = facing;
             otherPortal.markDirty();
             if (player != null) {
-                player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.relinked", targetDimId));
+                player.sendMessage(new TextComponentTranslation("chat.personalWorld.relinked", targetDimId));
             }
             PersonalSpaceMod.LOG.info(
                     "Linked portal at {}:{},{},{} to {}:{},{},{}",
@@ -267,108 +369,74 @@ public class PortalTileEntity extends TileEntity {
                     otherX,
                     otherY,
                     otherZ,
-                    worldObj.provider.dimensionId,
-                    xCoord,
-                    yCoord,
-                    zCoord);
+                    getWorld().provider.getDimension(),
+                    pos.getX(),
+                    pos.getY(),
+                    pos.getZ());
         }
     }
 
     public void updateSettings(EntityPlayerMP player, DimensionConfig unsafeConfig) {
-        if (worldObj.isRemote || player == null) {
+        if (getWorld().isRemote || player == null) return;
+        if (!getWorld().canMineBlockBody(player, pos)) {
+            player.sendMessage(new TextComponentTranslation("chat.personalWorld.denied"));
             return;
         }
-        if (!worldObj.canMineBlock(player, xCoord, yCoord, zCoord)) {
-            // permissions check
-            player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.denied"));
-            PersonalSpaceMod.LOG.warn(
-                    "Player {} tried to modify settings for portal block @{},{},{} (dim {}, target dim {}), denied - spawn protection.",
-                    player,
-                    xCoord,
-                    yCoord,
-                    zCoord,
-                    worldObj.provider.dimensionId,
-                    targetDimId);
-            return;
-        }
-        // Send a fake block break event to test permissions further
         if (Config.useBlockEventChecks) {
-            BlockEvent.BreakEvent fakeBreakEvent = new BlockEvent.BreakEvent(
-                    xCoord,
-                    yCoord,
-                    zCoord,
-                    worldObj,
-                    PersonalSpaceMod.BLOCK_PORTAL,
-                    0,
-                    player);
-            if (MinecraftForge.EVENT_BUS.post(fakeBreakEvent)) {
-                player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.denied"));
-                PersonalSpaceMod.LOG.warn(
-                        "Player {} tried to modify settings for portal block @{},{},{} (dim {}, target dim {}), denied - block permission.",
-                        player,
-                        xCoord,
-                        yCoord,
-                        zCoord,
-                        worldObj.provider.dimensionId,
-                        targetDimId);
+            BlockEvent.BreakEvent check = new BlockEvent.BreakEvent(getWorld(), pos, getWorld().getBlockState(pos), player);
+            if (MinecraftForge.EVENT_BUS.post(check)) {
+                player.sendMessage(new TextComponentTranslation("chat.personalWorld.denied"));
                 return;
             }
         }
-        if (!DimensionConfig.canUseLayers(unsafeConfig.getLayersAsString(), false)) {
-            player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.badLayers"));
-            PersonalSpaceMod.LOG.warn(
-                    "Player {} tried to modify settings for portal block @{},{},{} (dim {}, target dim {}), denied - using forbidden layers.",
-                    player,
-                    xCoord,
-                    yCoord,
-                    zCoord,
-                    worldObj.provider.dimensionId,
-                    targetDimId);
+        if (getWorld().provider instanceof PersonalWorldProvider || this.active) {
+            // The private dimension owns its settings. Only sky presentation may change after creation.
+            int dim = getWorld().provider instanceof PersonalWorldProvider
+                    ? getWorld().provider.getDimension() : this.targetDimId;
+            DimensionConfig real = DimensionConfig.getForDimension(dim, false);
+            if (real == null) return;
+            real.setSkyColor(unsafeConfig.getSkyColor());
+            real.setStarBrightness(unsafeConfig.getStarBrightness());
+            real.setWeatherEnabled(unsafeConfig.isWeatherEnabled());
+            real.setDaylightCycle(unsafeConfig.getDaylightCycle());
+            real.setCloudsEnabled(unsafeConfig.isCloudsEnabled());
+            real.setSkyType(unsafeConfig.getSkyType());
+            PersonalSpaceMod.INSTANCE.onDimSettingsChangeServer(dim);
             return;
         }
-        if (!DimensionConfig.canUseBiome(unsafeConfig.getBiomeId(), false)) {
-            unsafeConfig.setBiomeId("Plains");
+        if (getWorld().provider.getDimension() != 0 || this.active) {
+            player.sendMessage(new TextComponentTranslation("chat.personalWorld.settingsLocked"));
+            return;
         }
-        DimensionConfig sanitized = new DimensionConfig();
-        sanitized.copyFrom(unsafeConfig, false, true, true);
-        boolean createdNewDim = false;
-        int targetDimId = 0;
-        if (this.worldObj.provider instanceof PersonalWorldProvider) {
-            targetDimId = this.worldObj.provider.dimensionId;
-        } else if (this.active) {
-            targetDimId = this.targetDimId;
+        if (unsafeConfig.getLayers().isEmpty()
+                || !DimensionConfig.canUseLayers(unsafeConfig.getLayersAsString(), false)) {
+            player.sendMessage(new TextComponentTranslation("chat.personalWorld.badLayers"));
+            return;
         }
-        boolean changed = true;
-        if (targetDimId > 0) {
-            DimensionConfig realConfig = DimensionConfig.getForDimension(targetDimId, false);
-            if (realConfig == null) {
-                return;
-            }
-            changed = realConfig.copyFrom(sanitized, false, true, realConfig.getAllowGenerationChanges());
-            realConfig.setAllowGenerationChanges(false);
-            PersonalSpaceMod.INSTANCE.onDimSettingsChangeServer(targetDimId);
-        } else {
-            if (this.worldObj.provider.dimensionId != 0) {
-                return;
-            }
-            // create new dimension
-            targetDimId = DimensionConfig.nextFreeDimId();
-            sanitized.setAllowGenerationChanges(false);
-            sanitized.registerWithDimensionManager(targetDimId, false);
-            PersonalSpaceMod.INSTANCE.onDimSettingsChangeServer(targetDimId);
-            this.active = true;
-            this.targetDimId = targetDimId;
-            this.targetPosY = sanitized.getGroundLevel() + 1;
-            markDirty();
-            createdNewDim = true;
-
-            linkOtherPortal(true, player);
+        if (!DimensionConfig.canUseBiome(unsafeConfig.getBiomeId(), false)) unsafeConfig.setBiomeId("Plains");
+        DimensionConfig created = new DimensionConfig();
+        created.copyFrom(unsafeConfig, false, true, true);
+        created.setAllowGenerationChanges(false);
+        int newId = DimensionConfig.nextFreeDimId();
+        try {
+            PersonalSpaceMod.INSTANCE.saveDimensionConfig(newId, created);
+            created.registerWithDimensionManager(newId, false);
+            if (DimensionManager.getWorld(newId) == null) DimensionManager.initDimension(newId);
+            if (DimensionManager.getWorld(newId) == null) throw new IllegalStateException("Dimension initialization failed");
+        } catch (Exception e) {
+            PersonalSpaceMod.LOG.error("Could not create personal dimension " + newId, e);
+            if (DimensionManager.isDimensionRegistered(newId)) DimensionManager.unregisterDimension(newId);
+            CommonProxy.getDimensionConfigObjects(false).remove(newId);
+            player.sendMessage(new TextComponentTranslation("chat.personalWorld.createFailed"));
+            return;
         }
+        this.active = true;
+        this.targetDimId = newId;
+        this.targetPosY = created.getGroundLevel() + 1;
+        markDirty();
+        linkOtherPortal(true, player);
         Packets.INSTANCE.sendWorldList().sendToClients();
-        if (createdNewDim) {
-            player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.created"));
-        } else if (changed) {
-            player.addChatMessage(new ChatComponentTranslation("chat.personalWorld.updated"));
-        }
+        player.sendMessage(new TextComponentTranslation("chat.personalWorld.created"));
     }
+
 }

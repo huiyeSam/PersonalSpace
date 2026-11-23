@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import net.minecraft.block.Block;
@@ -21,13 +22,17 @@ public class Config {
 
         public static final String[] allowedBlocks = new String[] { "minecraft:air", "minecraft:bedrock",
                 "minecraft:stone", "minecraft:cobblestone", "minecraft:dirt", "minecraft:grass",
-                "minecraft:double_stone_slab", "minecraft:netherrack" };
+                "minecraft:double_stone_slab", "minecraft:netherrack", "minecraft:concrete:0-15",
+                "minecraft:stonebrick:0-3", "personalspace:smooth_stone" };
 
-        public static final String[] allowedBoundaryBlocks = new String[] { "minecraft:wool:0-15" };
+        public static final String[] allowedBoundaryBlocks = new String[] { "minecraft:concrete:0-15",
+                "minecraft:stonebrick:0-3", "personalspace:smooth_stone" };
 
-        public static final String[] allowedGapBlocks = new String[] { "minecraft:wool:0-15" };
+        public static final String[] allowedGapBlocks = new String[] { "minecraft:concrete:0-15",
+                "minecraft:stonebrick:0-3", "personalspace:smooth_stone" };
 
-        public static final String[] allowedCenterBlocks = new String[] { "minecraft:wool:0-15" };
+        public static final String[] allowedCenterBlocks = new String[] { "minecraft:concrete:0-15",
+                "minecraft:stonebrick:0-3", "personalspace:smooth_stone" };
 
         public static final String[] allowedBiomes = new String[] { "Plains", "Ocean", "Desert", "Extreme Hills",
                 "Forest", "Taiga", "Swampland", "River", "MushroomIsland", "Swampland", "Jungle", "Savanna", "Mesa" };
@@ -37,6 +42,7 @@ public class Config {
         public static final boolean useBlockEventChecks = true;
         public static final int dropdownMaxVisibleRows = 6;
         public static final int dropdownMaxVisibleColumns = 12;
+        public static final int roadAreaChunks = 5;
     }
 
     private static class Categories {
@@ -52,9 +58,10 @@ public class Config {
     public static HashSet<String> allowedBiomes = new HashSet<>(Arrays.asList(Defaults.allowedBiomes));
     public static int firstDimensionId = Defaults.firstDimensionId;
     public static boolean debugLogging = Defaults.debugLogging;
-    public static boolean useBlockEventChecks = true;
+    public static boolean useBlockEventChecks = Defaults.useBlockEventChecks;
     public static int dropdownMaxVisibleRows = Defaults.dropdownMaxVisibleRows;
     public static int dropdownMaxVisibleColumns = Defaults.dropdownMaxVisibleColumns;
+    public static int roadAreaChunks = Defaults.roadAreaChunks;
 
     private static File savedConfigFile = null;
 
@@ -62,94 +69,111 @@ public class Config {
         return savedConfigFile;
     }
 
-    public static void synchronizeConfiguration(File configFile) {
-        savedConfigFile = configFile;
-        Configuration configuration = new Configuration(configFile);
-        configuration.load();
+    /** Stone bricks are always selectable everywhere, even in old config files. */
+    private static final String STONEBRICK_ENTRY = "minecraft:stonebrick:0-3";
 
-        defaultPresets = configuration.getStringList(
-                Categories.general,
-                "defaultPresets",
-                Defaults.defaultPresets,
-                "Default world configuration presets. Format: blockname*layers;blockname*layers;..., example preset: minecraft:bedrock;minecraft:dirt*3;minecraft:grass");
+    private static void ensureStonebrick(HashSet<String> set) {
+        boolean missing = true;
+        for (String entry : set) {
+            if (entry.toLowerCase().startsWith("minecraft:stonebrick")) {
+                missing = false;
+                break;
+            }
+        }
+        if (missing) {
+            set.add(STONEBRICK_ENTRY);
+        }
+    }
 
-        allowedBlocks = new HashSet<>(
-                Arrays.asList(
-                        configuration.getStringList(
-                                Categories.general,
-                                "allowedBlocks",
-                                Defaults.allowedBlocks,
-                                "Allowed layer blocks with meta ranges. Format: modid:block:damage  damage: 0, 0-12, !5, 0-15,!3. Blocks without meta spec default to meta 0. Example: minecraft:stone:0-6")));
+    private static final String LANG_PREFIX = "personalspace.config.";
+    private static final String BLOCK_RULE_FORMAT = "\n格式：modid:block[:元数据]，例如 minecraft:stone:0-6；可用 !3 排除元数据 3。"
+            + "\nFormat: modid:block[:meta], e.g. minecraft:stone:0-6; use !3 to exclude meta 3.";
+    private static Configuration configuration;
 
-        allowedBoundaryBlocks = new HashSet<>(
-                Arrays.asList(
-                        configuration.getStringList(
-                                Categories.general,
-                                "allowedBoundaryBlocks",
-                                Defaults.allowedBoundaryBlocks,
-                                "Allowed boundary blocks with meta ranges. Format: modid:block:damage  damage: 0, 0-12, !5, 0-15,!3. Example: minecraft:stone:0-6")));
+    public static Configuration getConfiguration() {
+        return configuration;
+    }
 
-        allowedGapBlocks = new HashSet<>(
-                Arrays.asList(
-                        configuration.getStringList(
-                                Categories.general,
-                                "allowedGapBlocks",
-                                Defaults.allowedGapBlocks,
-                                "Allowed gap blocks with meta ranges. Format: modid:block:damage  damage: 0, 0-12, !5, 0-15,!3. Example: minecraft:wool:0-15")));
-
-        allowedCenterBlocks = new HashSet<>(
-                Arrays.asList(
-                        configuration.getStringList(
-                                Categories.general,
-                                "allowedCenterBlocks",
-                                Defaults.allowedCenterBlocks,
-                                "Allowed center marker blocks with meta ranges. Format: modid:block:damage  damage: 0, 0-12, !5, 0-15,!3. Example: minecraft:wool:0-15")));
-
-        allowedBiomes = Arrays
-                .stream(
-                        configuration.getStringList(
-                                Categories.general,
-                                "allowedBiomes",
-                                Defaults.allowedBiomes,
-                                "List of biomes allowed for the personal dimensions."))
-                .map(String::toLowerCase).collect(Collectors.toCollection(HashSet::new));
-
-        firstDimensionId = configuration.getInt(
-                "firstDimensionId",
-                Categories.general,
-                Defaults.firstDimensionId,
-                0,
-                Integer.MAX_VALUE,
-                "First dimension ID to use for newly generated worlds");
-
-        debugLogging = configuration
-                .getBoolean("debugLogging", Categories.general, Defaults.debugLogging, "Debug logging toggle");
-
-        useBlockEventChecks = configuration.getBoolean(
-                "useBlockEventChecks",
-                Categories.general,
-                Defaults.useBlockEventChecks,
-                "Use fake Block break events to check for permissions, disable in case of broken event handlers");
-
-        dropdownMaxVisibleRows = configuration.getInt(
-                "dropdownMaxVisibleRows",
-                Categories.general,
-                Defaults.dropdownMaxVisibleRows,
-                1,
-                20,
-                "Maximum number of visible rows in block dropdown menus");
-
-        dropdownMaxVisibleColumns = configuration.getInt(
-                "dropdownMaxVisibleColumns",
-                Categories.general,
-                Defaults.dropdownMaxVisibleColumns,
-                1,
-                24,
-                "Maximum number of visible columns in block dropdown menus");
-
-        if (configuration.hasChanged()) {
+    public static void setDebugLogging(boolean enabled) {
+        debugLogging = enabled;
+        if (configuration != null) {
+            configuration.get(Categories.general, "debugLogging", Defaults.debugLogging).set(enabled);
             configuration.save();
         }
+    }
+
+    public static void synchronizeConfiguration(File configFile) {
+        savedConfigFile = configFile;
+        configuration = new Configuration(configFile);
+        configuration.load();
+        applyConfiguration();
+        // Persist updated comments even when migrating a file with no changed values.
+        configuration.save();
+    }
+
+    public static void saveGuiChanges() {
+        applyConfiguration();
+        validateBlocks();
+        configuration.save();
+    }
+
+    private static void applyConfiguration() {
+        defaultPresets = stringList("defaultPresets", Defaults.defaultPresets,
+                "私人维度的地层预设。格式：方块ID*层数;方块ID*层数，例如 minecraft:bedrock;minecraft:dirt*3;minecraft:grass。",
+                "Layer presets for personal dimensions. Format: block_id*layers;block_id*layers, e.g. minecraft:bedrock;minecraft:dirt*3;minecraft:grass.");
+
+        allowedBlocks = blockRules("allowedBlocks", Defaults.allowedBlocks,
+                "允许用作地层的方块。", "Blocks allowed in terrain layers.");
+        allowedBoundaryBlocks = blockRules("allowedBoundaryBlocks", Defaults.allowedBoundaryBlocks,
+                "允许用作区块边界的方块。", "Blocks allowed in chunk boundaries.");
+        allowedGapBlocks = blockRules("allowedGapBlocks", Defaults.allowedGapBlocks,
+                "允许用作隔段或马路的方块。", "Blocks allowed in gaps or roads.");
+        allowedCenterBlocks = blockRules("allowedCenterBlocks", Defaults.allowedCenterBlocks,
+                "允许用作中心标记的方块。", "Blocks allowed as center markers.");
+
+        allowedBiomes = Arrays.stream(stringList("allowedBiomes", Defaults.allowedBiomes,
+                "私人维度可选的生物群系名称，不区分大小写。",
+                "Biome names allowed in personal dimensions, case-insensitive."))
+                .map(value -> value.toLowerCase(Locale.ROOT)).collect(Collectors.toCollection(HashSet::new));
+
+        firstDimensionId = integer("firstDimensionId", Defaults.firstDimensionId, 0, Integer.MAX_VALUE,
+                "分配新私人维度 ID 的起始值，不改变已有维度的 ID。",
+                "Starting ID for new personal dimensions. Does not change existing IDs.");
+        debugLogging = bool("debugLogging", Defaults.debugLogging,
+                "是否启用详细调试日志。", "Enable detailed debug logging.");
+        useBlockEventChecks = bool("useBlockEventChecks", Defaults.useBlockEventChecks,
+                "通过模拟方块破坏事件检查权限。仅在事件处理器不兼容时考虑关闭。",
+                "Check permissions using simulated block break events. Consider disabling only if an event handler is incompatible.");
+        dropdownMaxVisibleRows = integer("dropdownMaxVisibleRows", Defaults.dropdownMaxVisibleRows, 1, 20,
+                "方块下拉菜单同时可见的最大行数。", "Maximum visible rows in block dropdown menus.");
+        dropdownMaxVisibleColumns = integer("dropdownMaxVisibleColumns", Defaults.dropdownMaxVisibleColumns, 1, 24,
+                "方块下拉菜单同时可见的最大列数。", "Maximum visible columns in block dropdown menus.");
+        roadAreaChunks = integer("roadAreaChunks", Defaults.roadAreaChunks, 1, 20,
+                "边界间隔为 0 时，马路之间区域的默认边长，单位为区块。",
+                "Default area width between roads in chunks when the boundary interval is zero.");
+    }
+
+    private static String[] stringList(String name, String[] defaults, String zh, String en) {
+        return configuration.getStringList(name, Categories.general, defaults, zh + "\n" + en, null,
+                LANG_PREFIX + name);
+    }
+
+    private static HashSet<String> blockRules(String name, String[] defaults, String zh, String en) {
+        String comment = zh + "\n" + en + BLOCK_RULE_FORMAT
+                + "\n未指定元数据时使用 0；石砖始终可选。\nOmitted meta defaults to 0; stone bricks are always selectable.";
+        HashSet<String> rules = new HashSet<>(Arrays.asList(configuration.getStringList(name, Categories.general,
+                defaults, comment, null, LANG_PREFIX + name)));
+        ensureStonebrick(rules);
+        return rules;
+    }
+
+    private static int integer(String name, int defaultValue, int min, int max, String zh, String en) {
+        return configuration.getInt(name, Categories.general, defaultValue, min, max, zh + "\n" + en,
+                LANG_PREFIX + name);
+    }
+
+    private static boolean bool(String name, boolean defaultValue, String zh, String en) {
+        return configuration.getBoolean(name, Categories.general, defaultValue, zh + "\n" + en, LANG_PREFIX + name);
     }
 
     public static void validateBlocks() {

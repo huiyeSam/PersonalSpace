@@ -11,9 +11,9 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.ChatComponentText;
-import net.minecraft.util.ChatComponentTranslation;
-import net.minecraft.util.ChunkCoordinates;
+import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.TextComponentTranslation;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.WorldServer;
 import net.minecraftforge.common.DimensionManager;
 
@@ -25,8 +25,13 @@ import me.eigenraven.personalspace.world.PersonalTeleporter;
 public class PersonalSpaceCommand extends CommandBase {
 
     @Override
-    public String getCommandName() {
+    public String getName() {
         return "pspace";
+    }
+
+    @Override
+    public List<String> getAliases() {
+        return java.util.Collections.singletonList("psp");
     }
 
     /**
@@ -38,21 +43,38 @@ public class PersonalSpaceCommand extends CommandBase {
     }
 
     @Override
-    public String getCommandUsage(ICommandSender sender) {
+    public String getUsage(ICommandSender sender) {
         return "commands.pspace.usage";
     }
 
     @Override
-    public void processCommand(ICommandSender sender, String[] args) {
+    public void execute(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
         if (args.length < 1 || sender == null) {
             throw new WrongUsageException("commands.pspace.usage");
+        }
+        if (args[0].equalsIgnoreCase("debug")) {
+            if (args.length < 2 || args[1].equalsIgnoreCase("status")) {
+                sender.sendMessage(new TextComponentTranslation("commands.pspace.debug.status", Config.debugLogging));
+                return;
+            }
+            if (args[1].equalsIgnoreCase("on") || args[1].equalsIgnoreCase("true")) {
+                Config.setDebugLogging(true);
+            } else if (args[1].equalsIgnoreCase("off") || args[1].equalsIgnoreCase("false")) {
+                Config.setDebugLogging(false);
+            } else {
+                throw new WrongUsageException("commands.pspace.usage");
+            }
+            sender.sendMessage(new TextComponentTranslation("commands.pspace.debug.status", Config.debugLogging));
+            return;
         }
         if (args[0].equalsIgnoreCase("ls")) {
             CommonProxy.getDimensionConfigObjects(false).forEachEntry((dimId, dimCfg) -> {
                 if (dimCfg == null) {
                     return true;
                 }
-                sender.addChatMessage(new ChatComponentText(String.format("%d: %s", dimId, dimCfg.getSaveDir(dimId))));
+                java.io.File root = DimensionManager.getCurrentSaveRootDirectory();
+                java.io.File worldDir = root == null ? null : new java.io.File(root, dimCfg.getSaveDir(dimId));
+                sender.sendMessage(new TextComponentString(String.format("%d: %s", dimId, worldDir == null ? dimCfg.getSaveDir(dimId) : worldDir.getAbsolutePath())));
                 return true;
             });
             return;
@@ -61,22 +83,24 @@ public class PersonalSpaceCommand extends CommandBase {
             if (args.length < 2) {
                 throw new WrongUsageException("commands.pspace.usage");
             }
-            EntityPlayerMP player = getPlayer(sender, args[1]);
-            sender.addChatMessage(
-                    new ChatComponentTranslation(
+            EntityPlayerMP player = getPlayer(server, sender, args[1]);
+            sender.sendMessage(
+                    new TextComponentTranslation(
                             "commands.pspace.where",
-                            sender.getCommandSenderName(),
-                            player.worldObj.provider.dimensionId));
+                            sender.getName(),
+                            player.world.provider.getDimension()));
             return;
         }
         if (args[0].equalsIgnoreCase("tpx")) {
             if (args.length < 3) {
                 throw new WrongUsageException("commands.pspace.usage");
             }
-            EntityPlayerMP player = getPlayer(sender, args[1]);
-            int dim = parseInt(sender, args[2]);
+            EntityPlayerMP player = getPlayer(server, sender, args[1]);
+            int dim = parseInt(args[2]);
             if (!DimensionManager.isDimensionRegistered(dim)) {
-                throw new CommandException("commands.pspace.badDimension");
+                if (PersonalSpaceMod.INSTANCE == null || !PersonalSpaceMod.INSTANCE.restoreDimensionConfig(dim)) {
+                    throw new CommandException("commands.pspace.badDimension");
+                }
             }
             WorldServer dimWorld = DimensionManager.getWorld(dim);
             if (dimWorld == null) {
@@ -86,29 +110,39 @@ public class PersonalSpaceCommand extends CommandBase {
                     throw new CommandException("commands.pspace.badDimension");
                 }
             }
-            ChunkCoordinates target = dimWorld.getSpawnPoint();
-            target.posY = dimWorld.getTopSolidOrLiquidBlock(target.posX, target.posZ) + 1;
-            double x = target.posX, y = target.posY, z = target.posZ;
+            BlockPos target = dimWorld.getSpawnPoint();
+            target = dimWorld.getTopSolidOrLiquidBlock(target).up();
+            double x = target.getX(), y = target.getY(), z = target.getZ();
             if (args.length >= 6) {
-                ChunkCoordinates coords = sender.getPlayerCoordinates();
-                x = func_110666_a(sender, x, args[3]);
-                y = func_110666_a(sender, y, args[4]);
-                z = func_110666_a(sender, z, args[5]);
+                BlockPos coords = sender.getPosition();
+                x = parseDouble(coords.getX(), args[3], false);
+                y = parseDouble(coords.getY(), args[4], false);
+                z = parseDouble(coords.getZ(), args[5], false);
+            }
+            DimensionConfig pointConfig = DimensionConfig.getForDimension(dim, false);
+            BlockPos point = pointConfig == null ? null : pointConfig.getTeleportPoint();
+            if (args.length < 6 && point != null
+                    && dimWorld.getBlockState(point).getBlock() == PersonalSpaceMod.BLOCK_TELEPORT_POINT) {
+                x = point.getX();
+                y = point.getY() + 1;
+                z = point.getZ();
             }
             PersonalTeleporter tp = new PersonalTeleporter(dimWorld, (int) x, (int) y, (int) z);
-            player.mcServer.getConfigurationManager().transferPlayerToDimension(player, dim, tp);
-            sender.addChatMessage(
-                    new ChatComponentTranslation("commands.pspace.tpx", sender.getCommandSenderName(), dim, x, y, z));
+            player.mcServer.getPlayerList().transferPlayerToDimension(player, dim, tp);
+            sender.sendMessage(
+                    new TextComponentTranslation("commands.pspace.tpx", sender.getName(), dim, x, y, z));
             return;
         }
         if (args[0].equalsIgnoreCase("give-portal")) {
             if (args.length < 3) {
                 throw new WrongUsageException("commands.pspace.usage");
             }
-            EntityPlayerMP player = getPlayer(sender, args[1]);
-            int dim = parseInt(sender, args[2]);
+            EntityPlayerMP player = getPlayer(server, sender, args[1]);
+            int dim = parseInt(args[2]);
             if (!DimensionManager.isDimensionRegistered(dim)) {
-                throw new CommandException("commands.pspace.badDimension");
+                if (PersonalSpaceMod.INSTANCE == null || !PersonalSpaceMod.INSTANCE.restoreDimensionConfig(dim)) {
+                    throw new CommandException("commands.pspace.badDimension");
+                }
             }
             WorldServer dimWorld = DimensionManager.getWorld(dim);
             if (dimWorld == null) {
@@ -118,40 +152,43 @@ public class PersonalSpaceCommand extends CommandBase {
                     throw new CommandException("commands.pspace.badDimension");
                 }
             }
-            ChunkCoordinates target = dimWorld.getSpawnPoint();
-            target.posY = dimWorld.getTopSolidOrLiquidBlock(target.posX, target.posZ) + 1;
-            double x = target.posX, y = target.posY, z = target.posZ;
+            BlockPos target = dimWorld.getSpawnPoint();
+            target = dimWorld.getTopSolidOrLiquidBlock(target).up();
+            double x = target.getX(), y = target.getY(), z = target.getZ();
             if (args.length >= 6) {
-                ChunkCoordinates coords = sender.getPlayerCoordinates();
-                x = func_110666_a(sender, x, args[3]);
-                y = func_110666_a(sender, y, args[4]);
-                z = func_110666_a(sender, z, args[5]);
+                BlockPos coords = sender.getPosition();
+                x = parseDouble(coords.getX(), args[3], false);
+                y = parseDouble(coords.getY(), args[4], false);
+                z = parseDouble(coords.getZ(), args[5], false);
             }
             ItemStack itemstack = new ItemStack(PersonalSpaceMod.BLOCK_PORTAL, 1, 0);
             NBTTagCompound tag = new NBTTagCompound();
             tag.setBoolean("active", true);
             tag.setIntArray("target", new int[] { dim, (int) x, (int) y, (int) z });
-            itemstack.setTagCompound(tag);
-            EntityItem entityitem = player.dropPlayerItemWithRandomChoice(itemstack, false);
-            entityitem.delayBeforeCanPickup = 0;
-            entityitem.func_145797_a(player.getCommandSenderName());
+            NBTTagCompound itemTag = new NBTTagCompound();
+            itemTag.setBoolean("CommandLink", true);
+            itemTag.setTag("PersonalSpacePortal", tag);
+            itemstack.setTagCompound(itemTag);
+            EntityItem entityitem = player.dropItem(itemstack, false);
+            entityitem.setPickupDelay(0);
+            entityitem.setThrower(player.getName());
             return;
         }
         if (args[0].equalsIgnoreCase("allow-worldgen-change")) {
             if (args.length < 2) {
                 throw new WrongUsageException("commands.pspace.usage");
             }
-            int dim = parseInt(sender, args[1]);
+            int dim = parseInt(args[1]);
             DimensionConfig cfg = DimensionConfig.getForDimension(dim, false);
             if (cfg == null) {
                 throw new CommandException("commands.pspace.badDimension");
             }
             cfg.setAllowGenerationChanges(true);
             Packets.INSTANCE.sendWorldList().sendToClients();
-            sender.addChatMessage(
-                    new ChatComponentTranslation(
+            sender.sendMessage(
+                    new TextComponentTranslation(
                             "commands.pspace.allow-worldgen-change",
-                            sender.getCommandSenderName(),
+                            sender.getName(),
                             dim));
             return;
         }
@@ -163,7 +200,7 @@ public class PersonalSpaceCommand extends CommandBase {
             Config.synchronizeConfiguration(configFile);
             Config.validateBlocks();
             Packets.INSTANCE.sendWorldList().sendToClients();
-            sender.addChatMessage(new ChatComponentTranslation("commands.pspace.reload-config.success"));
+            sender.sendMessage(new TextComponentTranslation("commands.pspace.reload-config.success"));
             return;
         }
 
@@ -174,24 +211,27 @@ public class PersonalSpaceCommand extends CommandBase {
      * Adds the strings available in this command to the given list of tab completion options.
      */
     @Override
-    public List<String> addTabCompletionOptions(ICommandSender sender, String[] args) {
-        return switch (args.length) {
-            case 0, 1 -> getListOfStringsMatchingLastWord(
-                    args,
-                    "ls",
-                    "where",
-                    "tpx",
-                    "give-portal",
-                    "allow-worldgen-change",
-                    "reload-config");
-            case 2 -> getListOfStringsMatchingLastWord(args, this.getPlayers());
-            default -> null;
-        };
+    public List<String> getTabCompletions(MinecraftServer server, ICommandSender sender, String[] args, BlockPos pos) {
+        switch (args.length) {
+            case 0:
+            case 1:
+                return getListOfStringsMatchingLastWord(
+                        args,
+                        "ls",
+                        "where",
+                        "tpx",
+                        "give-portal",
+                        "allow-worldgen-change",
+                        "reload-config",
+                        "debug");
+            case 2:
+                return getListOfStringsMatchingLastWord(args, server.getOnlinePlayerNames());
+            default:
+                return null;
+        }
     }
 
-    protected String[] getPlayers() {
-        return MinecraftServer.getServer().getAllUsernames();
-    }
+    
 
     /**
      * Return whether the specified command parameter index is a username parameter.

@@ -9,6 +9,7 @@ import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.Tessellator;
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.util.ResourceLocation;
 
 import org.lwjgl.opengl.GL11;
@@ -144,7 +145,7 @@ public class Widget {
 
     public final void clickSound() {
         Minecraft.getMinecraft().getSoundHandler()
-                .playSound(PositionedSoundRecord.func_147674_a(new ResourceLocation("gui.button.press"), 1.0F));
+                .playSound(PositionedSoundRecord.getMasterRecord(net.minecraft.init.SoundEvents.UI_BUTTON_CLICK, 1.0F));
     }
 
     public static void drawGradientRect(int xLeft, int yTop, int xRight, int yBottom, int topRGBA, int bottomRGBA,
@@ -162,14 +163,12 @@ public class Widget {
         GL11.glDisable(GL11.GL_ALPHA_TEST);
         OpenGlHelper.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, 1, 0);
         GL11.glShadeModel(GL11.GL_SMOOTH);
-        Tessellator tessellator = Tessellator.instance;
-        tessellator.startDrawingQuads();
-        tessellator.setColorRGBA_F(topR, topG, topB, topA);
-        tessellator.addVertex(xRight, yTop, zLevel);
-        tessellator.addVertex(xLeft, yTop, zLevel);
-        tessellator.setColorRGBA_F(bottomR, bottomG, bottomB, bottomA);
-        tessellator.addVertex(xLeft, yBottom, zLevel);
-        tessellator.addVertex(xRight, yBottom, zLevel);
+        Tessellator tessellator = Tessellator.getInstance();
+        tessellator.getBuffer().begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        tessellator.getBuffer().pos(xRight, yTop, zLevel).color(topR, topG, topB, topA).endVertex();
+        tessellator.getBuffer().pos(xLeft, yTop, zLevel).color(topR, topG, topB, topA).endVertex();
+        tessellator.getBuffer().pos(xLeft, yBottom, zLevel).color(bottomR, bottomG, bottomB, bottomA).endVertex();
+        tessellator.getBuffer().pos(xRight, yBottom, zLevel).color(bottomR, bottomG, bottomB, bottomA).endVertex();
         tessellator.draw();
         GL11.glShadeModel(GL11.GL_FLAT);
         GL11.glDisable(GL11.GL_BLEND);

@@ -10,13 +10,19 @@ import java.util.Objects;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.NetHandlerPlayServer;
-import net.minecraft.network.play.server.S2BPacketChangeGameState;
+import net.minecraft.network.play.server.SPacketChangeGameState;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.storage.WorldInfo;
 import net.minecraftforge.common.DimensionManager;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.world.WorldEvent;
+import net.minecraftforge.event.terraingen.OreGenEvent;
+import net.minecraftforge.event.terraingen.PopulateChunkEvent;
+import net.minecraftforge.event.world.ChunkEvent;
+import net.minecraftforge.event.world.WorldEvent;
+import net.minecraftforge.event.terraingen.DecorateBiomeEvent;
+import net.minecraftforge.fml.common.eventhandler.EventPriority;
 
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.logging.log4j.LogManager;
@@ -28,40 +34,46 @@ import appeng.api.AEApi;
 import appeng.api.IAppEngApi;
 import appeng.api.features.IWorldGen;
 import codechicken.lib.packet.PacketCustom;
-import cpw.mods.fml.common.FMLCommonHandler;
-import cpw.mods.fml.common.FMLLog;
-import cpw.mods.fml.common.Loader;
-import cpw.mods.fml.common.Mod;
-import cpw.mods.fml.common.Optional;
-import cpw.mods.fml.common.SidedProxy;
-import cpw.mods.fml.common.event.FMLInitializationEvent;
-import cpw.mods.fml.common.event.FMLInterModComms;
-import cpw.mods.fml.common.event.FMLLoadCompleteEvent;
-import cpw.mods.fml.common.event.FMLMissingMappingsEvent;
-import cpw.mods.fml.common.event.FMLPostInitializationEvent;
-import cpw.mods.fml.common.event.FMLPreInitializationEvent;
-import cpw.mods.fml.common.event.FMLServerAboutToStartEvent;
-import cpw.mods.fml.common.event.FMLServerStartedEvent;
-import cpw.mods.fml.common.event.FMLServerStartingEvent;
-import cpw.mods.fml.common.event.FMLServerStoppedEvent;
-import cpw.mods.fml.common.event.FMLServerStoppingEvent;
-import cpw.mods.fml.common.eventhandler.SubscribeEvent;
-import cpw.mods.fml.common.gameevent.PlayerEvent;
-import cpw.mods.fml.common.network.FMLNetworkEvent;
-import cpw.mods.fml.common.network.NetworkHandshakeEstablished;
-import cpw.mods.fml.common.network.NetworkRegistry;
-import cpw.mods.fml.common.registry.EntityRegistry;
-import cpw.mods.fml.common.registry.GameRegistry;
-import cpw.mods.fml.relauncher.ReflectionHelper;
-import cpw.mods.fml.relauncher.Side;
+import codechicken.lib.packet.ICustomPacketHandler;
+import net.minecraftforge.fml.common.FMLCommonHandler;
+import net.minecraftforge.fml.common.FMLLog;
+import net.minecraftforge.fml.common.Loader;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.common.Optional;
+import net.minecraftforge.fml.common.SidedProxy;
+import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLInterModComms;
+import net.minecraftforge.fml.common.event.FMLLoadCompleteEvent;
+import net.minecraftforge.event.RegistryEvent;
+import net.minecraft.block.Block;
+import net.minecraft.item.Item;
+import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppingEvent;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import net.minecraftforge.fml.common.gameevent.PlayerEvent;
+import net.minecraftforge.fml.common.gameevent.TickEvent;
+import net.minecraftforge.fml.common.network.FMLNetworkEvent;
+import net.minecraftforge.fml.common.network.NetworkHandshakeEstablished;
+import net.minecraftforge.fml.common.network.NetworkRegistry;
+import net.minecraftforge.fml.common.registry.EntityRegistry;
+import net.minecraftforge.fml.common.registry.GameRegistry;
+import net.minecraftforge.fml.relauncher.ReflectionHelper;
+import net.minecraftforge.fml.relauncher.Side;
 import gnu.trove.list.array.TIntArrayList;
 import gnu.trove.map.hash.TIntObjectHashMap;
 import me.eigenraven.personalspace.block.PortalBlock;
 import me.eigenraven.personalspace.block.PortalEntityItem;
 import me.eigenraven.personalspace.block.PortalItem;
 import me.eigenraven.personalspace.block.PortalTileEntity;
+import me.eigenraven.personalspace.item.PersonalSpaceKeyItem;
 import me.eigenraven.personalspace.config.Config;
 import me.eigenraven.personalspace.net.Packets;
+import me.eigenraven.personalspace.world.AsyncDimensionSaver;
 import me.eigenraven.personalspace.world.DimensionConfig;
 import me.eigenraven.personalspace.world.PersonalWorldProvider;
 
@@ -69,12 +81,13 @@ import me.eigenraven.personalspace.world.PersonalWorldProvider;
         modid = "personalspace",
         version = Tags.VERSION,
         name = PersonalSpaceMod.MODNAME,
-        acceptedMinecraftVersions = "[1.7.10]",
-        dependencies = "after:utilityworlds;after:appliedenergistics2-core;after:GalaxySpace;after:Thaumcraft")
+        acceptedMinecraftVersions = "[1.12.2]",
+        guiFactory = "me.eigenraven.personalspace.gui.PersonalSpaceGuiFactory",
+        dependencies = "after:utilityworlds;after:appliedenergistics2-core;after:galaxyspace;after:thaumcraft")
 public class PersonalSpaceMod {
 
     public static final String MODID = "personalspace";
-    public static final String MODNAME = "PersonalSpace";
+    public static final String MODNAME = "Personal Dimension";
 
     public static final String DIM_METADATA_FILE = "personalspace_metadata.cfg";
 
@@ -88,7 +101,10 @@ public class PersonalSpaceMod {
             serverSide = "me.eigenraven.personalspace.CommonProxy")
     public static CommonProxy proxy;
 
+    public static me.eigenraven.personalspace.block.TeleportPointBlock BLOCK_TELEPORT_POINT;
     public static PortalBlock BLOCK_PORTAL, BP_MIGRATION_2, BP_MIGRATION_3, BP_MIGRATION_4;
+    public static me.eigenraven.personalspace.block.SmoothStoneBlock BLOCK_SMOOTH_STONE;
+    public static PersonalSpaceKeyItem ITEM_PERSONAL_SPACE_KEY;
 
     public static final String CHANNEL = MODID;
 
@@ -103,30 +119,35 @@ public class PersonalSpaceMod {
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
+        DebugLog.initialize(event.getModConfigurationDirectory());
         if (Loader.isModLoaded("utilityworlds")) {
             throw new RuntimeException(
                     "Personal space mod cannot be loaded in the same instance with utilityworlds mod, because it replaces its functionality");
         }
+        // Initialize GTCEu reflection-based interception for ore veins and oil deposits
+        me.eigenraven.personalspace.world.OreGenInterceptor.initialize();
         if (event.getSide().isClient()) {
             PacketCustom
-                    .assignHandler(CHANNEL, (PacketCustom.IClientPacketHandler) Packets.INSTANCE::handleClientPacket);
+                    .assignHandler(CHANNEL, (ICustomPacketHandler.IClientPacketHandler) Packets.INSTANCE::handleClientPacket);
         }
-        PacketCustom.assignHandler(CHANNEL, (PacketCustom.IServerPacketHandler) Packets.INSTANCE::handleServerPacket);
+        PacketCustom.assignHandler(CHANNEL, (ICustomPacketHandler.IServerPacketHandler) Packets.INSTANCE::handleServerPacket);
         NetworkRegistry.INSTANCE.newEventDrivenChannel(CHANNEL + "_event").register(this);
         proxy.preInit(event);
+        BLOCK_TELEPORT_POINT = new me.eigenraven.personalspace.block.TeleportPointBlock();
+        BLOCK_TELEPORT_POINT.setRegistryName(MODID, "teleport_point");
         BLOCK_PORTAL = new PortalBlock(false);
-        BP_MIGRATION_2 = new PortalBlock(true);
-        BP_MIGRATION_3 = new PortalBlock(true);
-        BP_MIGRATION_4 = new PortalBlock(true);
-        GameRegistry.registerBlock(BLOCK_PORTAL, PortalItem.class, "personalPortal");
-        GameRegistry.registerBlock(BP_MIGRATION_2, PortalItem.class, "personalPortal_migration2");
-        GameRegistry.registerBlock(BP_MIGRATION_3, PortalItem.class, "personalPortal_migration3");
-        GameRegistry.registerBlock(BP_MIGRATION_4, PortalItem.class, "personalPortal_migration4");
-        GameRegistry.registerTileEntityWithAlternatives(
-                PortalTileEntity.class,
-                "personalspace:personalPortal",
-                "uw_portal_te");
-        EntityRegistry.registerModEntity(PortalEntityItem.class, "PortalItem", 1, this, 64, 20, true);
+        // Legacy fields remain as aliases so old save migration points to the one real portal block.
+        BP_MIGRATION_2 = BLOCK_PORTAL;
+        BP_MIGRATION_3 = BLOCK_PORTAL;
+        BP_MIGRATION_4 = BLOCK_PORTAL;
+        BLOCK_PORTAL.setRegistryName(MODID, "personalPortal");
+        BLOCK_SMOOTH_STONE = new me.eigenraven.personalspace.block.SmoothStoneBlock();
+        BLOCK_SMOOTH_STONE.setRegistryName(MODID, "smooth_stone");
+        ITEM_PERSONAL_SPACE_KEY = new PersonalSpaceKeyItem();
+        GameRegistry.registerTileEntity(PortalTileEntity.class, "personalspace:personalPortal");
+        EntityRegistry.registerModEntity(
+                new net.minecraft.util.ResourceLocation(MODID, "portal_item"),
+                PortalEntityItem.class, "PortalItem", 1, this, 64, 20, true);
     }
 
     @Mod.EventHandler
@@ -147,7 +168,7 @@ public class PersonalSpaceMod {
             return;
         }
         aeApi.registries().worldgen()
-                .disableWorldGenForProviderID(IWorldGen.WorldGenType.Meteorites, PersonalWorldProvider.class);
+                .disableWorldGenForProviderID(IWorldGen.WorldGenType.METEORITES, PersonalWorldProvider.class);
     }
 
     @Mod.EventHandler
@@ -160,11 +181,13 @@ public class PersonalSpaceMod {
     public void completeInit(FMLLoadCompleteEvent event) {
         proxy.completeInit(event);
         Config.validateBlocks();
+        me.eigenraven.personalspace.world.OreGenInterceptor.installGeneratorOverride();
     }
 
     @Mod.EventHandler
     public void serverAboutToStart(FMLServerAboutToStartEvent event) {
         stopping = false;
+        AsyncDimensionSaver.reset();
         proxy.serverAboutToStart(event);
         loadDimensionConfigs();
     }
@@ -174,6 +197,54 @@ public class PersonalSpaceMod {
     public void serverStarting(FMLServerStartingEvent event) {
         proxy.serverStarting(event);
         event.registerServerCommand(new PersonalSpaceCommand());
+    }
+
+    public boolean restoreDimensionConfig(int dimId) {
+        if (DimensionConfig.getForDimension(dimId, false) != null
+                && DimensionManager.isDimensionRegistered(dimId)) return true;
+        File root = DimensionManager.getCurrentSaveRootDirectory();
+        if (root == null || !root.isDirectory()) return false;
+        File[] dirs = root.listFiles();
+        if (dirs == null) return false;
+        String expectedDir = String.format("PERSONAL_DIM_%d", dimId);
+        for (File dir : dirs) {
+            if (!dir.isDirectory()) continue;
+            File file = new File(dir, DIM_METADATA_FILE);
+            if (file.isFile()) {
+                try {
+                    DimensionConfig cfg = new DimensionConfig();
+                    int storedId = cfg.syncWithFile(file, false, 0);
+                    if (storedId == dimId) {
+                        cfg.setSaveDirOverride(dir.getName());
+                        cfg.registerWithDimensionManager(dimId, false);
+                        LOG.info("Restored PersonalSpace world {} from {}", dimId, dir.getName());
+                        return true;
+                    }
+                    if (!dir.getName().equals(expectedDir)) continue;
+                    LOG.warn("Metadata in {} has dimension ID {}; restoring directory identity {}",
+                            file.getPath(), storedId, dimId);
+                    cfg.syncWithFile(file, true, dimId);
+                    cfg.setSaveDirOverride(dir.getName());
+                    cfg.registerWithDimensionManager(dimId, false);
+                    return true;
+                } catch (Exception e) {
+                    LOG.error("Couldn't restore personal dimension metadata from " + file.getPath(), e);
+                }
+            } else if (dir.getName().equals(expectedDir)) {
+                DimensionConfig cfg = new DimensionConfig();
+                cfg.setSaveDirOverride(dir.getName());
+                cfg.registerWithDimensionManager(dimId, false);
+                try {
+                    saveDimensionConfig(dimId, cfg);
+                } catch (IOException e) {
+                    LOG.error("Couldn't recreate metadata for existing personal dimension " + dimId, e);
+                    return false;
+                }
+                LOG.warn("Restored personal dimension {} from its existing save directory", dimId);
+                return true;
+            }
+        }
+        return false;
     }
 
     void loadDimensionConfigs() {
@@ -201,11 +272,22 @@ public class PersonalSpaceMod {
                     }
                     continue;
                 }
+                if (dir.getName().startsWith("PERSONAL_DIM_")) {
+                    try {
+                        int dimId = Integer.parseInt(dir.getName().substring("PERSONAL_DIM_".length()));
+                        if (restoreDimensionConfig(dimId)) {
+                            LOG.info("Recovered PersonalSpace world {} from directory {}", dimId, dir.getName());
+                            continue;
+                        }
+                    } catch (NumberFormatException e) {
+                        LOG.warn("Ignoring invalid PersonalSpace dimension directory {}", dir.getName());
+                    }
+                }
                 // Metadata not found, test for UW worlds.
                 MutablePair<DimensionConfig, Integer> dc = DimensionConfig.fromUtilityWorldsWorld(dir.getName());
                 if (dc != null) {
                     dc.getLeft().registerWithDimensionManager(dc.getRight(), false);
-                    saveConfig(dc.getRight(), dc.getLeft());
+                    saveDimensionConfig(dc.getRight(), dc.getLeft());
                     LOG.info("Migrated world {} (at {}) from utilityworlds", dc.getRight(), dir.getName());
                 }
             }
@@ -215,10 +297,11 @@ public class PersonalSpaceMod {
         }
     }
 
-    private void saveConfig(int dimId, DimensionConfig config) throws IOException {
+    /** Persist metadata before a newly-created dimension is exposed to Forge. */
+    public void saveDimensionConfig(int dimId, DimensionConfig config) throws IOException {
         File saveDir = DimensionManager.getCurrentSaveRootDirectory();
         if (saveDir == null || !saveDir.isDirectory()) {
-            return;
+            throw new IOException("World save root is not available while creating dimension " + dimId);
         }
         saveDir = new File(saveDir, config.getSaveDir(dimId));
         if (!(saveDir.exists() && saveDir.isDirectory())) {
@@ -228,17 +311,24 @@ public class PersonalSpaceMod {
             }
         }
         File dataFile = new File(saveDir, DIM_METADATA_FILE);
-        config.syncWithFile(dataFile, true, dimId);
+        // Forge's Configuration re-reads and rewrites the whole file, which is too slow
+        // for the server thread during autosaves. Snapshot here and write off-thread;
+        // the dirty flag is cleared now so this save is not queued twice, and any
+        // setter called afterwards re-marks the config for the next save event.
+        DimensionConfig snapshot = config.createSaveSnapshot();
+        config.clearNeedsSavingForAsyncSave();
+        AsyncDimensionSaver.saveAsync(dimId, config, snapshot, dataFile);
     }
 
     @SubscribeEvent
     public void worldLoad(WorldEvent.Load event) {
-        if (event.world.isRemote) return;
-        if (!(event.world.provider instanceof PersonalWorldProvider provider)) return;
+        if (event.getWorld().isRemote) return;
+        if (!(event.getWorld().provider instanceof PersonalWorldProvider)) return;
+        PersonalWorldProvider provider = (PersonalWorldProvider) event.getWorld().provider;
         DimensionConfig config = provider.getConfig();
         if (config == null) return;
         try {
-            WorldInfo derivedInfo = event.world.getWorldInfo();
+            WorldInfo derivedInfo = event.getWorld().getWorldInfo();
             WorldInfo standaloneInfo = new WorldInfo(derivedInfo.cloneNBTCompound(null));
             // DerivedWorldInfo.cloneNBTCompound writes its own default fields, not the
             // delegate's values. Copy time/weather from the live getters which delegate correctly.
@@ -248,14 +338,17 @@ public class PersonalSpaceMod {
             standaloneInfo.setThundering(derivedInfo.isThundering());
             standaloneInfo.setThunderTime(derivedInfo.getThunderTime());
 
-            if (config.isTimeDataPersisted()) {
+            if (config.getDaylightCycle() == DimensionConfig.DaylightCycle.SUN) {
+                standaloneInfo.setWorldTime(6000L);
+            } else if (config.getDaylightCycle() == DimensionConfig.DaylightCycle.MOON) {
+                standaloneInfo.setWorldTime(18000L);
+            } else if (config.isTimeDataPersisted()) {
                 config.applyTimeTo(standaloneInfo);
-                LOG.info("Restored persisted time/weather for personal dimension {}", provider.dimensionId);
+                LOG.info("Restored persisted time/weather for personal dimension {}", provider.getDimension());
             } else {
+                standaloneInfo.setWorldTime(derivedInfo.getWorldTime());
                 config.captureTimeFrom(standaloneInfo);
-                LOG.info(
-                        "Initialized time/weather from overworld for personal dimension {} (first load)",
-                        provider.dimensionId);
+                LOG.info("Initialized time/weather from overworld for personal dimension {} (first load)", provider.getDimension());
             }
 
             if (!config.isWeatherEnabled()) {
@@ -266,31 +359,163 @@ public class PersonalSpaceMod {
             if (worldInfoField == null) {
                 worldInfoField = ReflectionHelper.findField(World.class, "worldInfo", "field_72986_A");
             }
-            worldInfoField.set(event.world, standaloneInfo);
+            worldInfoField.set(event.getWorld(), standaloneInfo);
         } catch (Exception e) {
-            LOG.error("Failed to decouple WorldInfo for dimension " + provider.dimensionId, e);
+            LOG.error("Failed to decouple WorldInfo for dimension " + provider.getDimension(), e);
+        }
+    }
+
+    /**
+     * Personal dimensions are player-built spaces.  Do not let GregTech/GTCEu
+     * inject ore veins (including oil-related deposits) or replacement stone
+     * during Forge terrain generation.  The custom chunk generator already
+     * creates the configured layers, so cancelling this event is safe here.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void protectPersonalPortals(net.minecraftforge.event.world.ExplosionEvent.Detonate event) {
+        if (event.getWorld().provider instanceof PersonalWorldProvider) {
+            event.getAffectedBlocks().removeIf(pos -> event.getWorld().getBlockState(pos).getBlock() == BLOCK_PORTAL);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void preventPersonalDimensionOreGen(OreGenEvent.GenerateMinable event) {
+        if (event.getWorld() != null
+                && event.getWorld().provider instanceof PersonalWorldProvider) {
+            event.setResult(net.minecraftforge.fml.common.eventhandler.Event.Result.DENY);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void preventPersonalDimensionCustomWorldgen(PopulateChunkEvent.Populate event) {
+        if (event.getWorld() != null
+                && event.getWorld().provider instanceof PersonalWorldProvider) {
+            event.setResult(net.minecraftforge.fml.common.eventhandler.Event.Result.DENY);
+        }
+    }
+
+    /**
+     * GTCEu generates ore veins through DecorateBiomeEvent.Decorate with custom
+     * event types. Block all decoration in personal dimensions to prevent ore
+     * veins, oil deposits and other modded worldgen from spawning.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void preventPersonalDimensionDecorate(DecorateBiomeEvent.Decorate event) {
+        if (event.getWorld() != null
+                && event.getWorld().provider instanceof PersonalWorldProvider) {
+            event.setResult(net.minecraftforge.fml.common.eventhandler.Event.Result.DENY);
+        }
+    }
+
+    @SubscribeEvent
+    public void syncPersonalWorldTime(TickEvent.WorldTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || event.world.isRemote
+                || !(event.world.provider instanceof PersonalWorldProvider)) return;
+        PersonalWorldProvider provider = (PersonalWorldProvider) event.world.provider;
+        DimensionConfig.DaylightCycle cycle = provider.getConfig().getDaylightCycle();
+        if (cycle == DimensionConfig.DaylightCycle.SUN) {
+            event.world.getGameRules().setOrCreateGameRule("doDaylightCycle", "false");
+            event.world.setWorldTime(6000L);
+        } else if (cycle == DimensionConfig.DaylightCycle.MOON) {
+            event.world.getGameRules().setOrCreateGameRule("doDaylightCycle", "false");
+            event.world.setWorldTime(18000L);
+        } else {
+            event.world.getGameRules().setOrCreateGameRule("doDaylightCycle", "true");
+            WorldServer overworld = DimensionManager.getWorld(0);
+            if (overworld != null) event.world.setWorldTime(overworld.getWorldTime());
         }
     }
 
     @SubscribeEvent
     public void worldSave(WorldEvent.Save event) {
-        if (event.world.isRemote) return;
-        if (!(event.world.provider instanceof PersonalWorldProvider provider)) return;
+        if (event.getWorld().isRemote) return;
+        if (!(event.getWorld().provider instanceof PersonalWorldProvider)) return;
+        PersonalWorldProvider provider = (PersonalWorldProvider) event.getWorld().provider;
         DimensionConfig config = provider.getConfig();
         if (config == null) return;
         try {
-            config.captureTimeFrom(event.world.getWorldInfo());
+            config.captureTimeFrom(event.getWorld().getWorldInfo());
             if (!config.needsSaving()) return;
-            saveConfig(provider.dimensionId, config);
+            saveDimensionConfig(provider.getDimension(), config);
         } catch (Exception e) {
-            LOG.fatal("Couldn't save personal dimension data for " + event.world.provider.getDimensionName(), e);
+            LOG.fatal("Couldn't save personal dimension data for " + event.getWorld().provider.getDimension(), e);
         }
     }
 
+    private static final String PLAYER_PERSISTED = "PlayerPersisted";
+    private static final String LAST_PERSONAL_POSITION = "PersonalSpaceLastPosition";
+
+    private static NBTTagCompound getPersistedPlayerData(EntityPlayerMP player) {
+        NBTTagCompound root = player.getEntityData();
+        if (!root.hasKey(PLAYER_PERSISTED, 10)) root.setTag(PLAYER_PERSISTED, new NBTTagCompound());
+        return root.getCompoundTag(PLAYER_PERSISTED);
+    }
+
+    private static void rememberPersonalPosition(EntityPlayerMP player) {
+        if (player.world == null || !(player.world.provider instanceof PersonalWorldProvider)) return;
+        NBTTagCompound data = new NBTTagCompound();
+        data.setInteger("dimension", player.world.provider.getDimension());
+        data.setDouble("x", player.posX);
+        data.setDouble("y", player.posY);
+        data.setDouble("z", player.posZ);
+        data.setFloat("yaw", player.rotationYaw);
+        data.setFloat("pitch", player.rotationPitch);
+        getPersistedPlayerData(player).setTag(LAST_PERSONAL_POSITION, data);
+        LOG.debug("Saved last personal position for {}: dimension {}, {}, {}, {}",
+                player.getName(), data.getInteger("dimension"), data.getDouble("x"), data.getDouble("y"), data.getDouble("z"));
+    }
+
+    @SubscribeEvent
+    public void playerTick(TickEvent.PlayerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || event.player.world.isRemote
+                || !(event.player instanceof EntityPlayerMP)) return;
+        EntityPlayerMP player = (EntityPlayerMP) event.player;
+        if (player.ticksExisted % 20 == 0) rememberPersonalPosition(player);
+    }
+
+    @SubscribeEvent
+    public void playerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.player instanceof EntityPlayerMP) rememberPersonalPosition((EntityPlayerMP) event.player);
+    }
+
+    @SubscribeEvent
+    public void playerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.player instanceof EntityPlayerMP)) return;
+        EntityPlayerMP player = (EntityPlayerMP) event.player;
+        NBTTagCompound data = getPersistedPlayerData(player);
+        if (!data.hasKey(LAST_PERSONAL_POSITION, 10)) return;
+        NBTTagCompound last = data.getCompoundTag(LAST_PERSONAL_POSITION);
+        int dimension = last.getInteger("dimension");
+        if (dimension == 0 || (!DimensionManager.isDimensionRegistered(dimension)
+                && !restoreDimensionConfig(dimension))) {
+            LOG.warn("Saved personal dimension {} is unavailable for player {}", dimension, player.getName());
+            return;
+        }
+        player.mcServer.addScheduledTask(() -> {
+            if (player.connection == null) return;
+            WorldServer destination = DimensionManager.getWorld(dimension);
+            if (destination == null) {
+                DimensionManager.initDimension(dimension);
+                destination = DimensionManager.getWorld(dimension);
+            }
+            if (destination == null || !(destination.provider instanceof PersonalWorldProvider)) {
+                LOG.error("Could not restore personal dimension {} for player {}", dimension, player.getName());
+                return;
+            }
+            LOG.info("Restoring player {} to personal dimension {} at {}, {}, {}", player.getName(), dimension,
+                    last.getDouble("x"), last.getDouble("y"), last.getDouble("z"));
+            player.mcServer.getPlayerList().transferPlayerToDimension(player, dimension,
+                    new me.eigenraven.personalspace.world.PersonalTeleporter(destination,
+                            (int) Math.floor(last.getDouble("x")), (int) Math.floor(last.getDouble("y")),
+                            (int) Math.floor(last.getDouble("z")), last.getFloat("yaw"), last.getFloat("pitch")));
+        });
+    }
     @SubscribeEvent
     public void playerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
-        if (!(event.player instanceof EntityPlayerMP player)) return;
-        WorldServer world = player.mcServer.worldServerForDimension(event.toDim);
+        if (!(event.player instanceof EntityPlayerMP)) return;
+        EntityPlayerMP player = (EntityPlayerMP) event.player;
+        rememberPersonalPosition(player);
+        WorldServer world = player.mcServer.getWorld(event.toDim);
         if (world == null || !(world.provider instanceof PersonalWorldProvider)) return;
         DimensionConfig config = ((PersonalWorldProvider) world.provider).getConfig();
         if (config == null || !config.isWeatherEnabled()) return;
@@ -298,28 +523,31 @@ public class PersonalSpaceMod {
         // WorldClient.updateWeatherBody is a no-op so it never recovers.
         // S2B(7) sets rainingStrength without the reset.
         float rain = world.getRainStrength(1.0F);
-        float thunder = world.getWeightedThunderStrength(1.0F);
+        float thunder = world.getThunderStrength(1.0F);
         if (rain > 0.0F) {
-            player.playerNetServerHandler.sendPacket(new S2BPacketChangeGameState(7, rain));
+            player.connection.sendPacket(new SPacketChangeGameState(7, rain));
         }
         if (thunder > 0.0F) {
-            player.playerNetServerHandler.sendPacket(new S2BPacketChangeGameState(8, thunder));
+            player.connection.sendPacket(new SPacketChangeGameState(8, thunder));
         }
     }
 
     @SubscribeEvent
     public void worldUnload(WorldEvent.Unload event) {
         if (stopping) return;
-        if (event.world.isRemote) return;
-        if (!(event.world.provider instanceof PersonalWorldProvider provider)) return;
+        if (event.getWorld().isRemote) return;
+        if (!(event.getWorld().provider instanceof PersonalWorldProvider)) return;
+        PersonalWorldProvider provider = (PersonalWorldProvider) event.getWorld().provider;
         DimensionConfig config = provider.getConfig();
         if (config == null) return;
-        config.captureTimeFrom(event.world.getWorldInfo());
+        if (config.getDaylightCycle() == DimensionConfig.DaylightCycle.CYCLE) {
+            config.captureTimeFrom(event.getWorld().getWorldInfo());
+        }
         config.markDirty();
         try {
-            saveConfig(provider.dimensionId, config);
+            saveDimensionConfig(provider.getDimension(), config);
         } catch (IOException e) {
-            LOG.error("Couldn't save dimension " + provider.dimensionId + " on unload", e);
+            LOG.error("Couldn't save dimension " + provider.getDimension() + " on unload", e);
         }
     }
 
@@ -394,6 +622,15 @@ public class PersonalSpaceMod {
         if (config == null) {
             return;
         }
+        WorldServer liveWorld = DimensionManager.getWorld(dimId);
+        if (liveWorld != null && liveWorld.provider instanceof PersonalWorldProvider) {
+            liveWorld.getGameRules().setOrCreateGameRule("doDaylightCycle",
+                    config.getDaylightCycle() == DimensionConfig.DaylightCycle.CYCLE ? "true" : "false");
+        }
+        net.minecraft.server.MinecraftServer server = net.minecraftforge.fml.common.FMLCommonHandler.instance().getMinecraftServerInstance();
+        if (server != null) for (EntityPlayerMP online : server.getPlayerList().getPlayers()) {
+            me.eigenraven.personalspace.net.Packets.INSTANCE.sendWorldList().sendToPlayer(online);
+        }
         HashMap<Integer, Integer> tcBlacklist = getThaumcraftDimensionBlacklist();
         if (tcBlacklist != null) {
             if (config.isGeneratingTrees()) {
@@ -452,12 +689,14 @@ public class PersonalSpaceMod {
         configs.forEachEntry((dimId, dimCfg) -> {
             if (dimCfg == null || !dimCfg.needsSaving()) return true;
             try {
-                saveConfig(dimId, dimCfg);
+                saveDimensionConfig(dimId, dimCfg);
             } catch (IOException e) {
                 LOG.error("Couldn't save dimension " + dimId, e);
             }
             return true;
         });
+        // Block until every queued async config write has reached the disk.
+        AsyncDimensionSaver.flushAndWait();
     }
 
     private void deregisterDimensions(boolean isClient) {
@@ -466,11 +705,6 @@ public class PersonalSpaceMod {
                 if (DimensionManager.isDimensionRegistered(dimId)) {
                     FMLLog.info("Deregistering PersonalSpace dimension %d", dimId);
                     DimensionManager.unregisterDimension(dimId);
-                    if (DimensionManager.unregisterProviderType(dimId).length > 0) {
-                        FMLLog.severe(
-                                "PersonalSpace dimension id %d has other dimension ids registered for the same provider",
-                                dimId);
-                    }
                 }
                 return true;
             });
@@ -493,8 +727,10 @@ public class PersonalSpaceMod {
 
     @SubscribeEvent
     public void netEventHandler(FMLNetworkEvent.CustomNetworkEvent event) {
-        if (event.wrappedEvent instanceof NetworkHandshakeEstablished hs) {
-            if (hs.netHandler instanceof NetHandlerPlayServer netHandler) {
+        if (event.getWrappedEvent() instanceof NetworkHandshakeEstablished) {
+            NetworkHandshakeEstablished hs = (NetworkHandshakeEstablished) event.getWrappedEvent();
+            if (hs.netHandler instanceof NetHandlerPlayServer) {
+                NetHandlerPlayServer netHandler = (NetHandlerPlayServer) hs.netHandler;
                 PacketCustom pkt = Packets.INSTANCE.sendWorldList();
                 netHandler.sendPacket(pkt.toPacket());
             }
@@ -503,37 +739,57 @@ public class PersonalSpaceMod {
 
     @SubscribeEvent
     public void clientDisconnectionHandler(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
-        // clear all dynamic dimensions on disconnection
+        // Integrated server and client share the global DimensionManager. Do not
+        // unregister dimensions during local disconnect; serverStopped performs cleanup.
+        if (event.getManager().isLocalChannel()) {
+            return;
+        }
         deregisterDimensions(true);
         deregisterDimensions(false);
     }
 
-    @Mod.EventHandler
-    public void missingMapping(FMLMissingMappingsEvent event) {
-        for (FMLMissingMappingsEvent.MissingMapping mapping : event.getAll()) {
-            if (mapping.type == GameRegistry.Type.BLOCK) {
-                switch (mapping.name) {
-                    case "utilityworlds:uw_portal_mining" -> mapping
-                            .remap(GameRegistry.findBlock(MODID, "personalPortal"));
-                    case "utilityworlds:uw_portal_void" -> mapping
-                            .remap(GameRegistry.findBlock(MODID, "personalPortal_migration2"));
-                    case "utilityworlds:uw_portal_garden" -> mapping
-                            .remap(GameRegistry.findBlock(MODID, "personalPortal_migration3"));
-                    case "utilityworlds:uw_portal_return" -> mapping
-                            .remap(GameRegistry.findBlock(MODID, "personalPortal_migration4"));
-                    default -> {}
+    @Mod.EventBusSubscriber(modid = MODID)
+    public static class RegistryMigrationHandler {
+        @SubscribeEvent
+        public static void registerBlocks(RegistryEvent.Register<Block> event) {
+            event.getRegistry().register(BLOCK_PORTAL);
+            event.getRegistry().register(BLOCK_TELEPORT_POINT);
+            event.getRegistry().register(BLOCK_SMOOTH_STONE);
+        }
+
+        @SubscribeEvent
+        public static void registerItems(RegistryEvent.Register<Item> event) {
+            event.getRegistry().register(
+                    new PortalItem(BLOCK_PORTAL).setRegistryName(BLOCK_PORTAL.getRegistryName()));
+            event.getRegistry().register(new me.eigenraven.personalspace.block.TeleportPointItem(BLOCK_TELEPORT_POINT)
+                    .setRegistryName(BLOCK_TELEPORT_POINT.getRegistryName()));
+            event.getRegistry().register(new net.minecraft.item.ItemBlock(BLOCK_SMOOTH_STONE)
+                    .setRegistryName(BLOCK_SMOOTH_STONE.getRegistryName()));
+            event.getRegistry().register(ITEM_PERSONAL_SPACE_KEY);
+        }
+
+        @SubscribeEvent
+        public static void missingBlocks(RegistryEvent.MissingMappings<Block> event) {
+            for (RegistryEvent.MissingMappings.Mapping<Block> mapping : event.getMappings()) {
+                switch (mapping.key.toString()) {
+                    case "utilityworlds:uw_portal_mining": mapping.remap(BLOCK_PORTAL); break;
+                    case "utilityworlds:uw_portal_void": mapping.remap(BLOCK_PORTAL); break;
+                    case "utilityworlds:uw_portal_garden": mapping.remap(BLOCK_PORTAL); break;
+                    case "utilityworlds:uw_portal_return": mapping.remap(BLOCK_PORTAL); break;
+                    default: break;
                 }
-            } else if (mapping.type == GameRegistry.Type.ITEM) {
-                switch (mapping.name) {
-                    case "utilityworlds:uw_portal_mining" -> mapping
-                            .remap(GameRegistry.findItem(MODID, "personalPortal"));
-                    case "utilityworlds:uw_portal_void" -> mapping
-                            .remap(GameRegistry.findItem(MODID, "personalPortal_migration2"));
-                    case "utilityworlds:uw_portal_garden" -> mapping
-                            .remap(GameRegistry.findItem(MODID, "personalPortal_migration3"));
-                    case "utilityworlds:uw_portal_return" -> mapping
-                            .remap(GameRegistry.findItem(MODID, "personalPortal_migration4"));
-                    default -> {}
+            }
+        }
+
+        @SubscribeEvent
+        public static void missingItems(RegistryEvent.MissingMappings<Item> event) {
+            for (RegistryEvent.MissingMappings.Mapping<Item> mapping : event.getMappings()) {
+                switch (mapping.key.toString()) {
+                    case "utilityworlds:uw_portal_mining": mapping.remap(Item.getItemFromBlock(BLOCK_PORTAL)); break;
+                    case "utilityworlds:uw_portal_void": mapping.remap(Item.getItemFromBlock(BLOCK_PORTAL)); break;
+                    case "utilityworlds:uw_portal_garden": mapping.remap(Item.getItemFromBlock(BLOCK_PORTAL)); break;
+                    case "utilityworlds:uw_portal_return": mapping.remap(Item.getItemFromBlock(BLOCK_PORTAL)); break;
+                    default: break;
                 }
             }
         }

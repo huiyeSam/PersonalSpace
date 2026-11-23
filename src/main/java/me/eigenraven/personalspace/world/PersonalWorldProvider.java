@@ -3,18 +3,18 @@ package me.eigenraven.personalspace.world;
 import java.util.Arrays;
 
 import net.minecraft.entity.Entity;
-import net.minecraft.util.ChunkCoordinates;
-import net.minecraft.util.Vec3;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.WorldProvider;
-import net.minecraft.world.biome.BiomeGenBase;
-import net.minecraft.world.biome.WorldChunkManagerHell;
+import net.minecraft.world.biome.Biome;
+import net.minecraft.world.biome.BiomeProviderSingle;
 import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.IChunkProvider;
+import net.minecraft.world.gen.IChunkGenerator;
 import net.minecraftforge.client.IRenderHandler;
 
-import cpw.mods.fml.common.FMLCommonHandler;
-import cpw.mods.fml.relauncher.Side;
-import cpw.mods.fml.relauncher.SideOnly;
+import net.minecraftforge.fml.common.FMLCommonHandler;
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.relauncher.SideOnly;
 import me.eigenraven.personalspace.CommonProxy;
 import me.eigenraven.personalspace.PersonalSpaceMod;
 import me.eigenraven.personalspace.config.Config;
@@ -37,22 +37,35 @@ public class PersonalWorldProvider extends WorldProvider {
         super.setDimension(dim);
     }
 
+    public net.minecraft.world.World getWorldObject() {
+        return this.world;
+    }
+
     public DimensionConfig getConfig() {
         if (this.config == null) {
-            boolean isClient = (this.worldObj != null) ? this.worldObj.isRemote
+            boolean isClient = (this.world != null) ? this.world.isRemote
                     : FMLCommonHandler.instance().getEffectiveSide().isClient();
             if (Config.debugLogging) {
                 PersonalSpaceMod.LOG.info(
                         "PersonalWorldProvider loading config for dim {}, client {}",
-                        this.dimensionId,
+                        this.getDimension(),
                         isClient,
                         new Throwable());
             }
-            this.config = DimensionConfig.getForDimension(this.dimensionId, isClient);
+            this.config = DimensionConfig.getForDimension(this.getDimension(), isClient);
+            if (this.config == null && isClient) {
+                this.config = new DimensionConfig();
+                synchronized (CommonProxy.getDimensionConfigObjects(true)) {
+                    CommonProxy.getDimensionConfigObjects(true).put(this.getDimension(), this.config);
+                }
+                PersonalSpaceMod.LOG.warn(
+                        "Client has no settings yet for personal dimension {}; using temporary defaults until server sync",
+                        this.getDimension());
+            }
             if (this.config == null) {
                 PersonalSpaceMod.LOG.fatal(
                         "PersonalSpace couldn't find dimension config for dimension {}, detected side: {}\nknown client dimension IDs: {}\nknown server dimension IDs: {}\n",
-                        this.dimensionId,
+                        this.getDimension(),
                         isClient ? "CLIENT" : "SERVER",
                         Arrays.toString(CommonProxy.getDimensionConfigObjects(true).keys()),
                         Arrays.toString(CommonProxy.getDimensionConfigObjects(false).keys()),
@@ -62,47 +75,37 @@ public class PersonalWorldProvider extends WorldProvider {
         return this.config;
     }
 
-    @Override
-    public String getDimensionName() {
-        return "Personal World " + this.dimensionId;
-    }
-
-    @Override
     public void registerWorldChunkManager() {
         getConfig();
-        this.worldChunkMgr = new WorldChunkManagerHell(BiomeGenBase.plains, 1.0F);
+        this.biomeProvider = new BiomeProviderSingle(Biome.getBiome(1));
     }
 
-    public IChunkProvider createChunkGenerator() {
-        return new PersonalChunkProvider(this, this.worldObj.getSeed());
+    public IChunkGenerator createChunkGenerator() {
+        return new PersonalChunkProvider(this, this.world.getSeed());
     }
 
     @SideOnly(Side.CLIENT)
-    public Vec3 getFogColor(float sunAngle, float timeSinceLastTick) {
-        if (getConfig().getDaylightCycle() == DimensionConfig.DaylightCycle.CYCLE)
-            return super.getFogColor(sunAngle, timeSinceLastTick);
+    public Vec3d getFogColor(float sunAngle, float timeSinceLastTick) {
         int baseColor = this.config.getSkyColor();
 
         float red = (float) (baseColor >> 16 & 255) / 255.0F;
         float green = (float) (baseColor >> 8 & 255) / 255.0F;
         float blue = (float) (baseColor & 255) / 255.0F;
-        return Vec3.createVectorHelper(red, green, blue);
+        return new Vec3d(red, green, blue);
     }
 
     @Override
-    public ChunkCoordinates getSpawnPoint() {
-        return new ChunkCoordinates(8, getConfig().getGroundLevel() + 2, 8);
+    public BlockPos getSpawnPoint() {
+        return new BlockPos(8, getConfig().getGroundLevel() + 2, 8);
     }
 
     @Override
-    public ChunkCoordinates getRandomizedSpawnPoint() {
+    public BlockPos getRandomizedSpawnPoint() {
         return getSpawnPoint();
     }
 
     @Override
-    public Vec3 getSkyColor(Entity cameraEntity, float partialTicks) {
-        if (getConfig().getDaylightCycle() == DimensionConfig.DaylightCycle.CYCLE)
-            return super.getSkyColor(cameraEntity, partialTicks);
+    public Vec3d getSkyColor(Entity cameraEntity, float partialTicks) {
         return getFogColor(0.0f, partialTicks);
     }
 
@@ -124,7 +127,7 @@ public class PersonalWorldProvider extends WorldProvider {
 
     @Override
     public boolean canCoordinateBeSpawn(int x, int z) {
-        return this.worldObj.getTopBlock(x, z).getMaterial().blocksMovement();
+        return this.world.getGroundAboveSeaLevel(new BlockPos(x, 0, z)).getMaterial().blocksMovement();
     }
 
     @Override
@@ -138,7 +141,6 @@ public class PersonalWorldProvider extends WorldProvider {
         return false;
     }
 
-    @Override
     public boolean getWorldHasVoidParticles() {
         return false;
     }
@@ -150,9 +152,9 @@ public class PersonalWorldProvider extends WorldProvider {
 
     @Override
     public String getSaveFolder() {
-        String name = getConfig().getSaveDir(this.dimensionId);
+        String name = getConfig().getSaveDir(this.getDimension());
         if (Config.debugLogging) {
-            PersonalSpaceMod.LOG.info("Save folder for dim id {} is {}", this.dimensionId, name, new Throwable());
+            PersonalSpaceMod.LOG.info("Save folder for dim id {} is {}", this.getDimension(), name, new Throwable());
         }
         return name;
     }
@@ -198,21 +200,21 @@ public class PersonalWorldProvider extends WorldProvider {
         if (this.getConfig().isWeatherEnabled()) {
             super.calculateInitialWeather();
         } else {
-            this.worldObj.rainingStrength = 0.0F;
-            this.worldObj.thunderingStrength = 0.0F;
-            this.worldObj.prevRainingStrength = 0.0F;
-            this.worldObj.prevThunderingStrength = 0.0F;
+            this.world.rainingStrength = 0.0F;
+            this.world.thunderingStrength = 0.0F;
+            this.world.prevRainingStrength = 0.0F;
+            this.world.prevThunderingStrength = 0.0F;
         }
     }
 
     @Override
     public void updateWeather() {
-        if (!this.worldObj.isRemote && !this.getConfig().isWeatherEnabled()) {
+        if (!this.world.isRemote && !this.getConfig().isWeatherEnabled()) {
             this.resetRainAndThunder();
-            this.worldObj.rainingStrength = 0.0F;
-            this.worldObj.thunderingStrength = 0.0F;
-            this.worldObj.prevRainingStrength = 0.0F;
-            this.worldObj.prevThunderingStrength = 0.0F;
+            this.world.rainingStrength = 0.0F;
+            this.world.thunderingStrength = 0.0F;
+            this.world.prevRainingStrength = 0.0F;
+            this.world.prevThunderingStrength = 0.0F;
         } else {
             super.updateWeather();
         }
@@ -229,29 +231,35 @@ public class PersonalWorldProvider extends WorldProvider {
     }
 
     @Override
-    public boolean canBlockFreeze(int x, int y, int z, boolean byWater) {
-        return this.getConfig().isWeatherEnabled() && super.canBlockFreeze(x, y, z, byWater);
+    public boolean canBlockFreeze(BlockPos pos, boolean byWater) {
+        return this.getConfig().isWeatherEnabled() && super.canBlockFreeze(pos, byWater);
     }
 
     @Override
-    public boolean canSnowAt(int x, int y, int z, boolean checkLight) {
-        return this.getConfig().isWeatherEnabled() && super.canSnowAt(x, y, z, checkLight);
+    public boolean canSnowAt(BlockPos pos, boolean checkLight) {
+        return this.getConfig().isWeatherEnabled() && super.canSnowAt(pos, checkLight);
     }
 
-    @Override
-    public ChunkCoordinates getEntrancePortalLocation() {
-        return new ChunkCoordinates(8, getAverageGroundLevel(), 8);
+    public BlockPos getEntrancePortalLocation() {
+        return new BlockPos(8, getAverageGroundLevel(), 8);
+    }
+
+    public void invalidateSkyRenderer() {
+        this.lastSkyType = null;
+        if (this.world != null && this.world.isRemote) updateSkyType();
     }
 
     private void updateSkyType() {
-        if (this.worldObj == null || !this.worldObj.isRemote) {
+        if (this.world == null || !this.world.isRemote) {
             return;
         }
         DimensionConfig.SkyType currentSkyType = getConfig().getSkyType();
         if (lastSkyType != currentSkyType) {
             lastSkyType = currentSkyType;
-            setSkyRenderer((IRenderHandler) lastSkyType.makeSkyProvider());
-            setCloudRenderer((IRenderHandler) lastSkyType.makeCloudProvider());
+            IRenderHandler sky = (IRenderHandler) lastSkyType.makeSkyProvider();
+            IRenderHandler clouds = (IRenderHandler) lastSkyType.makeCloudProvider();
+            setSkyRenderer(sky);
+            setCloudRenderer(clouds);
         }
     }
 
@@ -267,5 +275,10 @@ public class PersonalWorldProvider extends WorldProvider {
     public IRenderHandler getCloudRenderer() {
         updateSkyType();
         return super.getCloudRenderer();
+    }
+
+    @Override
+    public net.minecraft.world.DimensionType getDimensionType() {
+        return DimensionConfig.getDimensionTypeForProvider();
     }
 }

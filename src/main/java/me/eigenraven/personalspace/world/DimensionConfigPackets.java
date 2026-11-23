@@ -3,7 +3,7 @@ package me.eigenraven.personalspace.world;
 import java.util.ArrayList;
 
 import net.minecraft.block.Block;
-import net.minecraft.world.biome.BiomeGenBase;
+import net.minecraft.world.biome.Biome;
 import net.minecraft.world.gen.FlatLayerInfo;
 
 import codechicken.lib.data.MCDataInput;
@@ -27,8 +27,8 @@ public class DimensionConfigPackets {
         pkt.writeBoolean(config.getAllowGenerationChanges());
         pkt.writeVarInt(config.getLayers().size());
         for (FlatLayerInfo info : config.getLayers()) {
-            pkt.writeVarInt(Block.getIdFromBlock(info.func_151536_b()));
-            pkt.writeVarInt(info.getFillBlockMeta());
+            pkt.writeVarInt(Block.getIdFromBlock(info.getLayerMaterial().getBlock()));
+            pkt.writeVarInt(info.getLayerMaterial().getBlock().getMetaFromState(info.getLayerMaterial()));
             pkt.writeVarInt(info.getLayerCount());
         }
 
@@ -38,9 +38,11 @@ public class DimensionConfigPackets {
         pkt.writeVarInt(config.getBoundaryMetaB());
         pkt.writeVarInt(config.getBoundaryChunkIntervalX());
         pkt.writeVarInt(config.getBoundaryChunkIntervalZ());
+        pkt.writeBoolean(config.isOverwriteFirstLayer());
 
         pkt.writeVarInt(config.getGapWidth());
         pkt.writeVarInt(config.getGapPreset().ordinal());
+        pkt.writeVarInt(config.getRoadAreaChunks());
         pkt.writeString(config.getGapBlockA());
         pkt.writeVarInt(config.getGapMetaA());
         pkt.writeString(config.getGapBlockB());
@@ -60,7 +62,7 @@ public class DimensionConfigPackets {
         config.setNeedsSavingForPacket(true);
         config.setSkyColor(pkt.readInt());
         config.setStarBrightness(pkt.readFloat());
-        config.setBiomeId(BiomeGenBase.getBiomeGenArray()[pkt.readVarInt()].biomeName);
+        config.setBiomeId(com.google.common.collect.Lists.newArrayList(Biome.REGISTRY).toArray(new Biome[0])[pkt.readVarInt()].getBiomeName());
         config.setDaylightCycle(DimensionConfig.DaylightCycle.fromOrdinal(pkt.readVarInt()));
         config.setCloudsEnabled(pkt.readBoolean());
         config.setSkyType(DimensionConfig.SkyType.fromOrdinal(pkt.readVarInt()));
@@ -76,9 +78,11 @@ public class DimensionConfigPackets {
         config.setBoundaryMetaB(pkt.readVarInt());
         config.setBoundaryChunkIntervalX(pkt.readVarInt());
         config.setBoundaryChunkIntervalZ(pkt.readVarInt());
+        config.setOverwriteFirstLayer(pkt.readBoolean());
 
         config.setGapWidth(pkt.readVarInt());
         config.setGapPreset(DimensionConfig.GapPreset.fromOrdinal(pkt.readVarInt()));
+        config.setRoadAreaChunks(pkt.readVarInt());
         config.setGapBlockA(pkt.readString());
         config.setGapMetaA(pkt.readVarInt());
         config.setGapBlockB(pkt.readString());
@@ -101,13 +105,14 @@ public class DimensionConfigPackets {
 
     private static ArrayList<FlatLayerInfo> readLayers(MCDataInput pkt) {
         int layerCount = pkt.readVarInt();
+        me.eigenraven.personalspace.DebugLog.log("read packet layers=%d", layerCount);
         ArrayList<FlatLayerInfo> layers = new ArrayList<>(layerCount);
         int y = 0;
         for (int layerI = 0; layerI < layerCount; ++layerI) {
             int blockId = pkt.readVarInt();
             int meta = pkt.readVarInt();
             int count = pkt.readVarInt();
-            FlatLayerInfo info = new FlatLayerInfo(count, Block.getBlockById(blockId), meta);
+            FlatLayerInfo info = new FlatLayerInfo(3, count, Block.getBlockById(blockId), meta);
             info.setMinY(y);
             layers.add(info);
             y += count;

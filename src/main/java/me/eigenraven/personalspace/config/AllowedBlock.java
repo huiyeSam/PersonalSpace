@@ -6,13 +6,21 @@ import java.util.List;
 
 import javax.annotation.Nonnull;
 
-import com.github.bsideup.jabel.Desugar;
+public class AllowedBlock {
+    private final String blockName;
+    private final List<MetaRange> ranges;
+    private final String original;
+    public String blockName() { return blockName; }
+    public List<MetaRange> ranges() { return ranges; }
+    public String original() { return original; }
 
-@Desugar
-public record AllowedBlock(String blockName, List<MetaRange> ranges, String original) {
-
-    @Desugar
-    public record MetaRange(int min, int max, boolean negated) {
+    public static class MetaRange {
+        private final int min;
+        private final int max;
+        private final boolean negated;
+        public int min() { return min; }
+        public int max() { return max; }
+        public boolean negated() { return negated; }
 
         public MetaRange(int min, int max, boolean negated) {
             this.min = Math.min(min, max);
@@ -86,8 +94,8 @@ public record AllowedBlock(String blockName, List<MetaRange> ranges, String orig
     public int getMinAllowedMeta() {
         int min = Integer.MAX_VALUE;
         for (MetaRange range : ranges) {
-            if (!range.negated() && range.min < min) {
-                min = range.min;
+            if (!range.negated() && range.min() < min) {
+                min = range.min();
             }
         }
         if (min == Integer.MAX_VALUE) {
@@ -104,8 +112,8 @@ public record AllowedBlock(String blockName, List<MetaRange> ranges, String orig
     public int getMaxAllowedMeta() {
         int max = 0;
         for (MetaRange range : ranges) {
-            if (!range.negated() && range.max > max) {
-                max = range.max;
+            if (!range.negated() && range.max() > max) {
+                max = range.max();
             }
         }
         for (int i = max; i >= 0; i--) {

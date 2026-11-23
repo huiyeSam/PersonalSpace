@@ -2,19 +2,21 @@ package me.eigenraven.personalspace;
 
 import net.minecraft.world.World;
 
-import cpw.mods.fml.common.event.FMLInitializationEvent;
-import cpw.mods.fml.common.event.FMLLoadCompleteEvent;
-import cpw.mods.fml.common.event.FMLPostInitializationEvent;
-import cpw.mods.fml.common.event.FMLPreInitializationEvent;
-import cpw.mods.fml.common.event.FMLServerAboutToStartEvent;
-import cpw.mods.fml.common.event.FMLServerStartedEvent;
-import cpw.mods.fml.common.event.FMLServerStartingEvent;
-import cpw.mods.fml.common.event.FMLServerStoppedEvent;
-import cpw.mods.fml.common.event.FMLServerStoppingEvent;
+import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLLoadCompleteEvent;
+import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppingEvent;
 import gnu.trove.map.hash.TIntObjectHashMap;
 import me.eigenraven.personalspace.block.PortalTileEntity;
 import me.eigenraven.personalspace.config.Config;
 import me.eigenraven.personalspace.world.DimensionConfig;
+import me.eigenraven.personalspace.world.OreGenInterceptor;
+import net.minecraftforge.common.MinecraftForge;
 
 public class CommonProxy {
 
@@ -33,6 +35,7 @@ public class CommonProxy {
     // etc., and register them with the GameRegistry."
     public void preInit(FMLPreInitializationEvent event) {
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
+        MinecraftForge.EVENT_BUS.register(new OreGenInterceptor());
     }
 
     // load "Do your mod setup. Build whatever data structures you care about. Register recipes."

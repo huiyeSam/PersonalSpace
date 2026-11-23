@@ -1,28 +1,55 @@
 package me.eigenraven.personalspace;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.entity.EntityClientPlayerMP;
+import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.ChatComponentText;
+import net.minecraft.util.text.TextComponentString;
 import net.minecraft.world.World;
+import net.minecraft.util.math.BlockPos;
 
-import cpw.mods.fml.client.registry.ClientRegistry;
-import cpw.mods.fml.common.event.FMLInitializationEvent;
-import cpw.mods.fml.common.event.FMLLoadCompleteEvent;
-import cpw.mods.fml.common.event.FMLPostInitializationEvent;
-import cpw.mods.fml.common.event.FMLPreInitializationEvent;
-import cpw.mods.fml.common.event.FMLServerAboutToStartEvent;
-import cpw.mods.fml.common.event.FMLServerStartedEvent;
-import cpw.mods.fml.common.event.FMLServerStartingEvent;
-import cpw.mods.fml.common.event.FMLServerStoppedEvent;
-import cpw.mods.fml.common.event.FMLServerStoppingEvent;
+import net.minecraft.client.renderer.block.model.ModelResourceLocation;
+import net.minecraft.item.Item;
+import net.minecraftforge.client.event.ModelRegistryEvent;
+import net.minecraftforge.client.model.ModelLoader;
+import net.minecraft.client.renderer.block.model.ModelResourceLocation;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.client.registry.ClientRegistry;
+import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLLoadCompleteEvent;
+import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppingEvent;
 import me.eigenraven.personalspace.block.PortalTileEntity;
 import me.eigenraven.personalspace.block.RenderPortal;
 import me.eigenraven.personalspace.gui.GuiEditWorld;
 
 public class ClientProxy extends CommonProxy {
+
+    @Mod.EventBusSubscriber(modid = PersonalSpaceMod.MODID, value = Side.CLIENT)
+    public static class ModelRegistration {
+        @SubscribeEvent
+        public static void registerModels(ModelRegistryEvent event) {
+            ModelLoader.setCustomModelResourceLocation(
+                    Item.getItemFromBlock(PersonalSpaceMod.BLOCK_TELEPORT_POINT), 0,
+                    new ModelResourceLocation(PersonalSpaceMod.BLOCK_TELEPORT_POINT.getRegistryName(), "inventory"));
+            ModelLoader.setCustomModelResourceLocation(
+                    Item.getItemFromBlock(PersonalSpaceMod.BLOCK_PORTAL), 0,
+                    new ModelResourceLocation(PersonalSpaceMod.BLOCK_PORTAL.getRegistryName(), "inventory"));
+            ModelLoader.setCustomModelResourceLocation(
+                    Item.getItemFromBlock(PersonalSpaceMod.BLOCK_SMOOTH_STONE), 0,
+                    new ModelResourceLocation(PersonalSpaceMod.BLOCK_SMOOTH_STONE.getRegistryName(), "inventory"));
+            ModelLoader.setCustomMeshDefinition(PersonalSpaceMod.ITEM_PERSONAL_SPACE_KEY,
+                    stack -> new ModelResourceLocation(PersonalSpaceMod.ITEM_PERSONAL_SPACE_KEY.getRegistryName(), "inventory"));
+        }
+    }
 
     // preInit "Run before anything else. Read your config, create blocks, items,
     // etc., and register them with the GameRegistry."
@@ -77,13 +104,14 @@ public class ClientProxy extends CommonProxy {
 
     @Override
     public void openPortalGui(World world, int x, int y, int z) {
-        TileEntity wte = world.getTileEntity(x, y, z);
-        if (!(wte instanceof PortalTileEntity te)) {
+        TileEntity wte = world.getTileEntity(new BlockPos(x, y, z));
+        if (!(wte instanceof PortalTileEntity)) {
             return;
         }
-        EntityClientPlayerMP player = Minecraft.getMinecraft().thePlayer;
-        if (!te.active && player.worldObj.provider.dimensionId != 0) {
-            player.addChatMessage(new ChatComponentText(I18n.format("chat.overworldPersonalDimension")));
+        EntityPlayerSP player = Minecraft.getMinecraft().player;
+        PortalTileEntity te = (PortalTileEntity) wte;
+        if (!te.active && player.world.provider.getDimension() != 0) {
+            player.sendMessage(new TextComponentString(I18n.format("chat.overworldPersonalDimension")));
             return;
         }
         if (!te.active || player.isSneaking()) {
@@ -94,7 +122,8 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void closePortalGui(PortalTileEntity owner) {
         GuiScreen screen = Minecraft.getMinecraft().currentScreen;
-        if (screen instanceof GuiEditWorld gui) {
+        if (screen instanceof GuiEditWorld) {
+            GuiEditWorld gui = (GuiEditWorld) screen;
             if (gui.tile == owner) {
                 Minecraft.getMinecraft().displayGuiScreen(null);
             }

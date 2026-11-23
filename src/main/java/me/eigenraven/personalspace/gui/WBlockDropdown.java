@@ -6,17 +6,17 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import net.minecraft.block.Block;
+import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiTextField;
-import net.minecraft.client.renderer.entity.RenderItem;
+import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
 import org.lwjgl.opengl.GL11;
 
-import com.github.bsideup.jabel.Desugar;
 
 import me.eigenraven.personalspace.config.AllowedBlock;
 import me.eigenraven.personalspace.config.Config;
@@ -57,9 +57,18 @@ public class WBlockDropdown extends Widget {
      * @param blockName    empty string = air
      * @param displayStack null for air
      */
-    @Desugar
-    public record BlockEntry(String blockName, int meta, ItemStack displayStack, String tooltip) {
-
+    public static class BlockEntry {
+        private final String blockName;
+        private final int meta;
+        private final ItemStack displayStack;
+        private final String tooltip;
+        public BlockEntry(String blockName, int meta, ItemStack displayStack, String tooltip) {
+            this.blockName = blockName; this.meta = meta; this.displayStack = displayStack; this.tooltip = tooltip;
+        }
+        public String blockName() { return blockName; }
+        public int meta() { return meta; }
+        public ItemStack displayStack() { return displayStack; }
+        public String tooltip() { return tooltip; }
     }
 
     private final List<BlockEntry> entries;
@@ -223,7 +232,7 @@ public class WBlockDropdown extends Widget {
         openDropdown = this;
         scrollOffset = 0;
         // Create a new GuiTextField for search; dimensions will be set at draw time
-        searchField = new GuiTextField(
+        searchField = new GuiTextField(0,
                 Minecraft.getMinecraft().fontRenderer,
                 0,
                 0,
@@ -272,7 +281,7 @@ public class WBlockDropdown extends Widget {
         BlockEntry selected = getSelectedEntry();
         if (selected != null && selected.displayStack != null && selected.displayStack.getItem() != null) {
             if (renderItem == null) {
-                renderItem = new RenderItem();
+                renderItem = Minecraft.getMinecraft().getRenderItem();
             }
             Icons.drawItem(1, position.height / 2 - 9, selected.displayStack, "", renderItem);
         } else {
@@ -385,7 +394,7 @@ public class WBlockDropdown extends Widget {
 
         // Draw grid items
         if (renderItem == null) {
-            renderItem = new RenderItem();
+            renderItem = Minecraft.getMinecraft().getRenderItem();
         }
 
         int startRow = dd.scrollOffset;
@@ -533,6 +542,8 @@ public class WBlockDropdown extends Widget {
 
                 if (idx >= 0 && idx < displayEntries.size() && col < itemsPerRow) {
                     BlockEntry entry = displayEntries.get(idx);
+                    me.eigenraven.personalspace.DebugLog.log("dropdown selected addMode=%s block=%s meta=%d index=%d",
+                            dd.addMode, entry.blockName(), entry.meta(), idx);
                     if (!dd.addMode) {
                         // Find original index in full entries list
                         int origIdx = dd.entries.indexOf(entry);

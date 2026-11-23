@@ -6,10 +6,12 @@ import javax.annotation.Nonnull;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
-import net.minecraft.client.renderer.entity.RenderItem;
+import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.item.ItemStack;
 
 import org.lwjgl.opengl.GL11;
+
+import me.eigenraven.personalspace.DebugLog;
 
 public class WButton extends Widget {
 
@@ -65,7 +67,7 @@ public class WButton extends Widget {
         }
         if (itemStack != null || (itemStackText != null && !itemStackText.isEmpty())) {
             if (renderItem == null) {
-                renderItem = new RenderItem();
+                renderItem = Minecraft.getMinecraft().getRenderItem();
             }
             textSpace -= 18;
             Icons.drawItem(1, position.height / 2 - 9, itemStack, itemStackText, renderItem);
@@ -96,6 +98,8 @@ public class WButton extends Widget {
     @Override
     protected boolean mouseClickedImpl(int x, int y, int button) {
         lastButton = button;
+        DebugLog.log("button clicked text=%s icon=%s x=%d y=%d w=%d h=%d enabled=%s mouseButton=%d",
+                text, buttonIcon, position.x, position.y, position.width, position.height, enabled, button);
         if (onClick != null) {
             onClick.run();
         }

@@ -28,12 +28,12 @@ public class PortalEntityItem extends EntityItem {
         this.motionZ = location.motionZ;
         this.rotationPitch = location.rotationPitch;
         this.rotationYaw = location.rotationYaw;
-        this.delayBeforeCanPickup = 10;
+        this.setPickupDelay(10);
     }
 
     @Override
     public boolean attackEntityFrom(DamageSource src, float dmg) {
-        if (src.equals(DamageSource.outOfWorld)) {
+        if (src == DamageSource.OUT_OF_WORLD) {
             return super.attackEntityFrom(src, dmg);
         }
         return false;

@@ -4,8 +4,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.Tessellator;
-import net.minecraft.client.renderer.entity.RenderItem;
+import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
@@ -67,19 +68,19 @@ public enum Icons {
     }
 
     private static void tSquare(double x, double y, double w, double h, double u0, double v0, double u1, double v1) {
-        Tessellator t = Tessellator.instance;
-        t.addVertexWithUV(x, y, 0, u0, v0);
-        t.addVertexWithUV(x, y + h, 0, u0, v1);
-        t.addVertexWithUV(x + w, y + h, 0, u1, v1);
-        t.addVertexWithUV(x + w, y, 0, u1, v0);
+        Tessellator t = Tessellator.getInstance();
+        t.getBuffer().pos(x, y, 0).tex(u0, v0).endVertex();
+        t.getBuffer().pos(x, y + h, 0).tex(u0, v1).endVertex();
+        t.getBuffer().pos(x + w, y + h, 0).tex(u1, v1).endVertex();
+        t.getBuffer().pos(x + w, y, 0).tex(u1, v0).endVertex();
     }
 
     public void drawAt(int xOff, int yOff) {
         GL11.glEnable(GL11.GL_BLEND);
         OpenGlHelper.glBlendFunc(770, 771, 1, 0);
         GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-        Tessellator t = Tessellator.instance;
-        t.startDrawingQuads();
+        Tessellator t = Tessellator.getInstance();
+        t.getBuffer().begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_TEX);
         tSquare(xOff, yOff, w, h, u0, v0, u1, v1);
         t.draw();
     }
@@ -92,8 +93,8 @@ public enum Icons {
         GL11.glEnable(GL11.GL_BLEND);
         OpenGlHelper.glBlendFunc(770, 771, 1, 0);
         GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-        Tessellator t = Tessellator.instance;
-        t.startDrawingQuads();
+        Tessellator t = Tessellator.getInstance();
+        t.getBuffer().begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_TEX);
         double w = w9, h = h9;
         double w3 = this.w / 3D;
         double h3 = this.h / 3D;
@@ -176,11 +177,10 @@ public enum Icons {
         t.draw();
     }
 
-    private static final ItemStack dummyStack = new ItemStack(Blocks.fire);
+    private static final ItemStack dummyStack = new ItemStack(Blocks.FIRE);
 
     public static void drawItem(int xOff, int yOff, ItemStack is, String text, RenderItem itemRender) {
         FontRenderer fr = Minecraft.getMinecraft().fontRenderer;
-        TextureManager tm = Minecraft.getMinecraft().getTextureManager();
         GL11.glPushMatrix();
         GL11.glPushAttrib(GL11.GL_ENABLE_BIT | GL11.GL_COLOR_BUFFER_BIT);
         GL11.glEnable(GL11.GL_ALPHA_TEST);
@@ -194,11 +194,11 @@ public enum Icons {
 
         GL11.glTranslatef(1.0f, 1.0f, 0.0f);
 
-        if (is != null && is.getItem() != null && is.stackSize > 0) {
-            itemRender.renderItemAndEffectIntoGUI(fr, tm, is, xOff, yOff);
-            itemRender.renderItemOverlayIntoGUI(fr, tm, is, xOff, yOff, text);
+        if (is != null && is.getItem() != null && is.getCount() > 0) {
+            itemRender.renderItemAndEffectIntoGUI(is, xOff, yOff);
+            itemRender.renderItemOverlayIntoGUI(fr, is, xOff, yOff, text);
         } else {
-            itemRender.renderItemOverlayIntoGUI(fr, tm, dummyStack, xOff, yOff, text);
+            itemRender.renderItemOverlayIntoGUI(fr, dummyStack, xOff, yOff, text);
         }
 
         RenderHelper.disableStandardItemLighting();

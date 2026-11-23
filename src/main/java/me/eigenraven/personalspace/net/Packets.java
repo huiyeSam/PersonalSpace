@@ -35,9 +35,12 @@ public enum Packets {
             return;
         }
         switch (PacketIds.VALUES[id]) {
-            case UPDATE_WORLDLIST -> handleWorldList(packetCustom);
-            case CHANGE_WORLD_SETTINGS -> {}
-            default -> {}
+            case UPDATE_WORLDLIST:
+                handleWorldList(packetCustom);
+                break;
+            case CHANGE_WORLD_SETTINGS:
+            default:
+                break;
         }
     }
 
@@ -47,21 +50,24 @@ public enum Packets {
             return;
         }
         switch (PacketIds.VALUES[id]) {
-            case UPDATE_WORLDLIST -> {}
-            case CHANGE_WORLD_SETTINGS -> {
+            case UPDATE_WORLDLIST:
+                break;
+            case CHANGE_WORLD_SETTINGS: {
                 int dim = pkt.readVarInt();
                 int x = pkt.readVarInt();
                 int y = pkt.readVarInt();
                 int z = pkt.readVarInt();
                 DimensionConfig desired = DimensionConfig.fromPacket(pkt);
-                if (sender != null && sender.worldObj != null && sender.worldObj.provider.dimensionId == dim) {
-                    TileEntity te = sender.worldObj.getTileEntity(x, y, z);
+                if (sender != null && sender.world != null && sender.world.provider.getDimension() == dim) {
+                    TileEntity te = sender.world.getTileEntity(new net.minecraft.util.math.BlockPos(x, y, z));
                     if (te instanceof PortalTileEntity) {
                         ((PortalTileEntity) te).updateSettings(sender, desired);
                     }
                 }
+                break;
             }
-            default -> {}
+            default:
+                break;
         }
     }
 
@@ -108,11 +114,14 @@ public enum Packets {
 
     public PacketCustom sendChangeWorldSettings(PortalTileEntity tile, DimensionConfig config) {
         PacketCustom pkt = new PacketCustom(PersonalSpaceMod.CHANNEL, PacketIds.CHANGE_WORLD_SETTINGS.ordinal());
-        pkt.writeVarInt(tile.getWorldObj().provider.dimensionId);
-        pkt.writeVarInt(tile.xCoord);
-        pkt.writeVarInt(tile.yCoord);
-        pkt.writeVarInt(tile.zCoord);
+        pkt.writeVarInt(tile.getWorld().provider.getDimension());
+        pkt.writeVarInt(tile.getPos().getX());
+        pkt.writeVarInt(tile.getPos().getY());
+        pkt.writeVarInt(tile.getPos().getZ());
         config.writeToPacket(pkt);
+        if (net.minecraftforge.fml.common.FMLCommonHandler.instance().getEffectiveSide().isClient()) {
+            int skyDimension = tile.active ? tile.targetDimId : tile.getWorld().provider.getDimension();
+        }
         return pkt;
     }
 
@@ -158,7 +167,14 @@ public enum Packets {
         for (int i = 0; i < dimConfigs; i++) {
             int dimId = pkt.readVarInt();
             DimensionConfig cfg = DimensionConfig.fromPacket(pkt);
+            if (net.minecraftforge.fml.common.FMLCommonHandler.instance().getEffectiveSide().isClient()) {
+            }
             cfg.registerWithDimensionManager(dimId, true);
+            net.minecraft.world.World world = Minecraft.getMinecraft().world;
+            if (world != null && world.provider.getDimension() == dimId
+                    && world.provider instanceof me.eigenraven.personalspace.world.PersonalWorldProvider) {
+                ((me.eigenraven.personalspace.world.PersonalWorldProvider) world.provider).invalidateSkyRenderer();
+            }
         }
     }
 }

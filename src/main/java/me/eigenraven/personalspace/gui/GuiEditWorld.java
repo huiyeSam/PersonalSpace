@@ -1,6 +1,7 @@
 package me.eigenraven.personalspace.gui;
 
 import java.awt.Rectangle;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -17,8 +18,8 @@ import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
-import net.minecraft.util.MathHelper;
-import net.minecraft.world.biome.BiomeGenBase;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.world.biome.Biome;
 import net.minecraft.world.gen.FlatLayerInfo;
 
 import org.lwjgl.input.Keyboard;
@@ -27,6 +28,7 @@ import org.lwjgl.opengl.GL11;
 
 import codechicken.lib.gui.GuiDraw;
 import me.eigenraven.personalspace.CommonProxy;
+import me.eigenraven.personalspace.DebugLog;
 import me.eigenraven.personalspace.PersonalSpaceMod;
 import me.eigenraven.personalspace.block.PortalTileEntity;
 import me.eigenraven.personalspace.config.AllowedBlock;
@@ -73,11 +75,14 @@ public class GuiEditWorld extends GuiScreen {
 
     public WTextField gapWidthField;
     public WButton gapPresetButton;
+    public WTextField roadAreaField;
+    public WLabel roadAreaLabel;
 
     public WBlockDropdown gapBlockADropdown;
     public WBlockDropdown gapBlockBDropdown;
     public WBlockDropdown gapBlockCDropdown;
     public WToggleButton applyToAllSurfaceLayersToggle;
+    public WToggleButton overwriteFirstLayerToggle;
 
     public WToggleButton centerEnabledToggle;
     public WButton centerDirectionButton;
@@ -97,8 +102,12 @@ public class GuiEditWorld extends GuiScreen {
     public Widget presetEditor;
     public Widget rootWidget = new Widget();
     public String voidPresetName = "gui.personalWorld.voidWorld";
+    // Prevent the render/update pass from reparsing text that was just generated from the layer editor.
+    private String lastGeneratedPresetText = null;
 
     public WBlockDropdown layersBlockDropdown;
+    private int lastScreenWidth = -1;
+    private int lastScreenHeight = -1;
     public int layerListScrollOffset = 0;
     public boolean layerScrollbarDragging = false;
     public static final int MAX_VISIBLE_LAYERS = 6;
@@ -122,9 +131,10 @@ public class GuiEditWorld extends GuiScreen {
     public GuiEditWorld(PortalTileEntity tile) {
         super();
         this.tile = tile;
+        this.desiredConfig.setLayers(DimensionConfig.PRESET_UW_VOID);
         int targetDimId = 0;
         DimensionConfig currentDimConfig = DimensionConfig
-                .getForDimension(tile.getWorldObj().provider.dimensionId, true);
+                .getForDimension(tile.getWorld().provider.getDimension(), true);
         if (currentDimConfig != null) {
             this.desiredConfig.copyFrom(currentDimConfig, false, true, true);
         } else if (tile.active && tile.targetDimId > 1) {
@@ -136,6 +146,10 @@ public class GuiEditWorld extends GuiScreen {
             }
         } else {
             this.desiredConfig.setAllowGenerationChanges(true);
+        }
+
+        if (this.desiredConfig.getLayers().isEmpty()) {
+            this.desiredConfig.setLayers(DimensionConfig.PRESET_UW_VOID);
         }
 
         reloadBoundaryRules();
@@ -150,6 +164,7 @@ public class GuiEditWorld extends GuiScreen {
                 .setBoundaryChunkIntervalZ(clampBoundaryChunk(this.desiredConfig.getBoundaryChunkIntervalZ()));
 
         this.desiredConfig.setGapWidth(clampGapWidth(this.desiredConfig.getGapWidth()));
+        this.desiredConfig.setRoadAreaChunks(clampRoadArea(this.desiredConfig.getRoadAreaChunks()));
         this.desiredConfig
                 .setGapMetaA(clampGapMeta(this.desiredConfig.getGapMetaA(), this.desiredConfig.getGapBlockA()));
         this.desiredConfig
@@ -161,7 +176,11 @@ public class GuiEditWorld extends GuiScreen {
     }
 
     private int clampGapWidth(int v) {
-        return MathHelper.clamp_int(v, 0, 5);
+        return MathHelper.clamp(v, 0, 5);
+    }
+
+    private int clampRoadArea(int v) {
+        return MathHelper.clamp(v, 1, DimensionConfig.MAX_ROAD_AREA_CHUNKS);
     }
 
     private void reloadBoundaryRules() {
@@ -186,7 +205,10 @@ public class GuiEditWorld extends GuiScreen {
             this.allowedCenterBlockNames.add("");
         }
 
-        this.allowedLayerRules = AllowedBlockRules.parseAll(PersonalSpaceMod.clientAllowedBlocks);
+        List<String> layerRules = PersonalSpaceMod.clientAllowedBlocks.isEmpty()
+                ? new ArrayList<>(Config.allowedBlocks)
+                : PersonalSpaceMod.clientAllowedBlocks;
+        this.allowedLayerRules = AllowedBlockRules.parseAll(layerRules);
 
         // Build dropdown entries
         this.boundaryBlockEntries = WBlockDropdown.buildEntriesFromRules(this.allowedBoundaryRules, true);
@@ -261,12 +283,12 @@ public class GuiEditWorld extends GuiScreen {
         super.updateScreen();
         rootWidget.update();
         WBlockDropdown.updateOpenDropdown();
-        if (!this.mc.thePlayer.isEntityAlive() || this.mc.thePlayer.isDead) {
-            this.mc.thePlayer.closeScreen();
+        if (!this.mc.player.isEntityAlive() || this.mc.player.isDead) {
+            this.mc.player.closeScreen();
         }
     }
 
-    private void addButton(GuiButton btn) {
+    private void addEditButton(GuiButton btn) {
         this.buttonList.add(btn);
         this.ySize += btn.height + 6;
     }
@@ -353,7 +375,7 @@ public class GuiEditWorld extends GuiScreen {
     }
 
     private int clampBoundaryChunk(int v) {
-        return MathHelper.clamp_int(v, 0, 20);
+        return MathHelper.clamp(v, 0, 20);
     }
 
     private void updateBoundaryButtons() {
@@ -396,6 +418,13 @@ public class GuiEditWorld extends GuiScreen {
         }
 
         boolean isSolid = desiredConfig.getGapPreset() == DimensionConfig.GapPreset.SOLID;
+
+        if (roadAreaField != null) {
+            roadAreaField.visible = !isSolid;
+        }
+        if (roadAreaLabel != null) {
+            roadAreaLabel.visible = !isSolid;
+        }
 
         if (gapBlockBDropdown != null) {
             gapBlockBDropdown.visible = !isSolid;
@@ -442,6 +471,9 @@ public class GuiEditWorld extends GuiScreen {
         if (!isTextFieldFocused(this.gapWidthField)) {
             this.gapWidthField.textField.setText(Integer.toString(this.desiredConfig.getGapWidth()));
         }
+        if (!isTextFieldFocused(this.roadAreaField)) {
+            this.roadAreaField.textField.setText(Integer.toString(this.desiredConfig.getRoadAreaChunks()));
+        }
     }
 
     private void clearExtendedPresetInputs() {
@@ -452,6 +484,7 @@ public class GuiEditWorld extends GuiScreen {
         this.desiredConfig.setBoundaryBlockB("");
         this.desiredConfig.setBoundaryMetaB(0);
         this.desiredConfig.setGapWidth(0);
+        this.desiredConfig.setRoadAreaChunks(Config.roadAreaChunks);
         this.desiredConfig.setGapBlockA("");
         this.desiredConfig.setGapMetaA(0);
         this.desiredConfig.setGapBlockB("");
@@ -459,6 +492,7 @@ public class GuiEditWorld extends GuiScreen {
         this.desiredConfig.setGapBlockC("");
         this.desiredConfig.setGapMetaC(0);
         this.desiredConfig.setApplyToAllSurfaceLayers(false);
+        this.desiredConfig.setOverwriteFirstLayer(false);
         this.desiredConfig.setCenterEnabled(false);
         this.desiredConfig.setCenterBlock("");
         this.desiredConfig.setCenterMeta(0);
@@ -471,19 +505,24 @@ public class GuiEditWorld extends GuiScreen {
         if (this.gapWidthField != null) {
             this.gapWidthField.textField.setText("0");
         }
+        if (this.roadAreaField != null) {
+            this.roadAreaField.textField.setText(Integer.toString(Config.roadAreaChunks));
+        }
         updateBoundaryButtons();
         updateGapButtons();
         updateApplyToAllSurfaceLayersButton();
         updateCenterButtons();
     }
 
-    private void syncPresetFromExtendedInputsIfChanged(int prevBoundaryX, int prevBoundaryZ, int prevGapWidth) {
+    private void syncPresetFromExtendedInputsIfChanged(int prevBoundaryX, int prevBoundaryZ, int prevGapWidth,
+            int prevRoadArea) {
         if (isTextFieldFocused(this.presetEntry)) {
             return;
         }
         if (prevBoundaryX != this.desiredConfig.getBoundaryChunkIntervalX()
                 || prevBoundaryZ != this.desiredConfig.getBoundaryChunkIntervalZ()
-                || prevGapWidth != this.desiredConfig.getGapWidth()) {
+                || prevGapWidth != this.desiredConfig.getGapWidth()
+                || prevRoadArea != this.desiredConfig.getRoadAreaChunks()) {
             this.configToPreset();
         }
     }
@@ -491,7 +530,7 @@ public class GuiEditWorld extends GuiScreen {
     private void updatePresetButtonPositions() {
         int total = presetButtons.size();
         int maxOffset = Math.max(0, total - MAX_VISIBLE_PRESETS);
-        presetScrollOffset = MathHelper.clamp_int(presetScrollOffset, 0, maxOffset);
+        presetScrollOffset = MathHelper.clamp(presetScrollOffset, 0, maxOffset);
         boolean needsScroll = total > MAX_VISIBLE_PRESETS;
 
         int px = 0;
@@ -537,6 +576,8 @@ public class GuiEditWorld extends GuiScreen {
     @Override
     public void initGui() {
         reloadBoundaryRules();
+        this.lastScreenWidth = this.width;
+        this.lastScreenHeight = this.height;
 
         // Create page containers
         Widget realRoot = new Widget();
@@ -702,6 +743,7 @@ public class GuiEditWorld extends GuiScreen {
                 preset = voidPresetName;
             }
             String finalPreset = preset;
+            final int presetIndex = pi;
             WButton btn = new WButton(
                     new Rectangle(0, this.ySize, 24, 18),
                     Integer.toString(pi),
@@ -709,7 +751,16 @@ public class GuiEditWorld extends GuiScreen {
                     WButton.DEFAULT_COLOR,
                     null,
                     () -> {
+                        DebugLog.log("button preset-%d clicked text=%s", presetIndex, finalPreset);
                         this.presetEntry.textField.setText(finalPreset);
+                        String presetLayers = DimensionConfig.extractLayersPart(finalPreset);
+                        if (DimensionConfig.canUseLayers(presetLayers, true)) {
+                            this.desiredConfig.setLayers(presetLayers);
+                            this.lastGeneratedPresetText = finalPreset;
+                            this.regeneratePresetEditor();
+                        } else {
+                            DebugLog.log("preset rejected text=%s clientRules=%s", finalPreset, PersonalSpaceMod.clientAllowedBlocks);
+                        }
                         if (!DimensionConfig.hasExtendedSettings(finalPreset)) {
                             clearExtendedPresetInputs();
                         }
@@ -752,7 +803,11 @@ public class GuiEditWorld extends GuiScreen {
                 true,
                 WButton.DEFAULT_COLOR,
                 null,
-                () -> switchPage(1));
+                () -> {
+                    if (!this.tile.active) {
+                        switchPage(1);
+                    }
+                });
         moreSettingsButton.tooltip = I18n.format("gui.personalWorld.moreSettings.tooltip");
         rootWidget.addChild(moreSettingsButton);
 
@@ -774,16 +829,20 @@ public class GuiEditWorld extends GuiScreen {
                     Block blk;
                     int meta = entry.meta();
                     if (entry.blockName() == null || entry.blockName().isEmpty()) {
-                        blk = Blocks.air;
+                        blk = Blocks.AIR;
                         meta = 0;
                     } else {
                         blk = DimensionConfig.blockFromString(entry.blockName());
                     }
-                    if (blk == null) return;
-                    FlatLayerInfo fli = new FlatLayerInfo(1, blk, meta);
+                    if (blk == null) {
+                        DebugLog.log("layer add rejected block=%s meta=%d", entry.blockName(), meta);
+                        return;
+                    }
+                    FlatLayerInfo fli = new FlatLayerInfo(3, 1, blk, meta);
                     this.desiredConfig.getMutableLayers().add(fli);
-                    this.desiredConfig.setLayers(this.desiredConfig.getLayersAsString());
+                    DebugLog.log("layer add block=%s meta=%d count=1 layers=%s", entry.blockName(), meta, this.desiredConfig.getLayersAsString());
                     this.configToPreset();
+                    this.regeneratePresetEditor();
                 });
         this.layersBlockDropdown.setLabel(I18n.format("gui.personalWorld.button.plus"));
         this.layersBlockDropdown.setGuiRelativePos(172, 0);
@@ -989,6 +1048,17 @@ public class GuiEditWorld extends GuiScreen {
 
         this.ySize += 21;
 
+        // Road area size: only visible in road mode, below the road/solid toggle.
+        this.roadAreaLabel = new WLabel(0, this.ySize + 5, I18n.format("gui.personalWorld.road.area"), false);
+        rootWidget.addChild(this.roadAreaLabel);
+        this.roadAreaField = new WTextField(
+                new Rectangle(125, this.ySize, 36, 18),
+                Integer.toString(desiredConfig.getRoadAreaChunks()));
+        this.roadAreaField.tooltip = I18n.format("gui.personalWorld.road.areaRange");
+        rootWidget.addChild(this.roadAreaField);
+
+        this.ySize += 21;
+
         int gapRowY = this.ySize;
         this.gapBlockADropdown = new WBlockDropdown(
                 new Rectangle(0, gapRowY, 20, 20),
@@ -1058,6 +1128,24 @@ public class GuiEditWorld extends GuiScreen {
         this.applyToAllSurfaceLayersToggle.addChild(applyToAllSurfaceLayersLabel);
         addWidget(this.applyToAllSurfaceLayersToggle);
 
+        this.overwriteFirstLayerToggle = new WToggleButton(
+                new Rectangle(0, this.ySize, 18, 18),
+                "",
+                false,
+                0,
+                desiredConfig.isOverwriteFirstLayer(),
+                () -> {
+                    desiredConfig.setOverwriteFirstLayer(overwriteFirstLayerToggle.getValue());
+                    configToPreset();
+                });
+        WLabel overwriteFirstLayerLabel = new WLabel(
+                24,
+                4,
+                I18n.format("gui.personalWorld.overwriteFirstLayer"),
+                false);
+        this.overwriteFirstLayerToggle.addChild(overwriteFirstLayerLabel);
+        addWidget(this.overwriteFirstLayerToggle);
+
         updateGapButtons();
 
         // Center marker section
@@ -1113,6 +1201,7 @@ public class GuiEditWorld extends GuiScreen {
 
         // Preview panel on page 2
         this.previewPanel = new WPreviewPanel(new Rectangle(166, 20, 130, 130), desiredConfig);
+        this.previewPanel.position = new Rectangle(166, 20, 130, 130);
         rootWidget.addChild(this.previewPanel);
 
         // Restore real root
@@ -1121,7 +1210,7 @@ public class GuiEditWorld extends GuiScreen {
         realRoot.addChild(page2Container);
 
         // Save/Cancel always visible at fixed position
-        int saveY = 244 - 16 - 22 + 5;
+        int saveY = 244 - 16 + 22 - 22 + 5;
         this.save = new WButton(
                 new Rectangle(0, saveY, 128, 20),
                 I18n.format("gui.done"),
@@ -1129,6 +1218,14 @@ public class GuiEditWorld extends GuiScreen {
                 WButton.DEFAULT_COLOR,
                 Icons.CHECKMARK,
                 () -> {
+                    String layers = desiredConfig.getLayersAsString();
+                    boolean validLayers = !desiredConfig.getLayers().isEmpty()
+                            && DimensionConfig.canUseLayers(layers, true);
+                    DebugLog.log("done clicked layers=%s layerCount=%d valid=%s allowed=%s", layers,
+                            desiredConfig.getLayers().size(), validLayers, PersonalSpaceMod.clientAllowedBlocks);
+                    if (!validLayers) {
+                        return;
+                    }
                     Packets.INSTANCE.sendChangeWorldSettings(this.tile, desiredConfig).sendToServer();
                     Minecraft.getMinecraft().displayGuiScreen(null);
                 });
@@ -1145,9 +1242,42 @@ public class GuiEditWorld extends GuiScreen {
         switchPage(0);
 
         this.xSize = 320 - 16;
-        this.ySize = 244 - 16;
+        this.ySize = 244 - 16 + 22;
         this.guiLeft = (this.width - this.xSize) / 2;
         this.guiTop = (this.height - this.ySize) / 2;
+        positionPageWidgets();
+    }
+
+    @Override
+    public void onResize(Minecraft mc, int width, int height) {
+        super.onResize(mc, width, height);
+        this.lastScreenWidth = width;
+        this.lastScreenHeight = height;
+        this.xSize = 320 - 16;
+        this.ySize = 244 - 16 + 22;
+        this.guiLeft = (width - this.xSize) / 2;
+        this.guiTop = (height - this.ySize) / 2;
+        positionPageWidgets();
+    }
+
+    private void positionPageWidgets() {
+        this.guiLeft = (this.width - this.xSize) / 2;
+        this.guiTop = (this.height - this.ySize) / 2;
+        WBlockDropdown.setScreenDimensions(this.width, this.height, this.guiLeft, this.guiTop);
+        positionDropdown(this.layersBlockDropdown, this.presetEditor, 172, 0);
+        positionDropdown(this.boundaryBlockADropdown, this.page2Container, 0, this.boundaryBlockADropdown.position.y);
+        positionDropdown(this.boundaryBlockBDropdown, this.page2Container, 42, this.boundaryBlockBDropdown.position.y);
+        positionDropdown(this.gapBlockADropdown, this.page2Container, 0, this.gapBlockADropdown.position.y);
+        positionDropdown(this.gapBlockBDropdown, this.page2Container, 42, this.gapBlockBDropdown.position.y);
+        positionDropdown(this.gapBlockCDropdown, this.page2Container, 84, this.gapBlockCDropdown.position.y);
+        positionDropdown(this.centerBlockDropdown, this.page2Container, 0, this.centerBlockDropdown.position.y);
+    }
+
+    private void positionDropdown(WBlockDropdown dropdown, Widget parent, int x, int y) {
+        if (dropdown == null || parent == null) {
+            return;
+        }
+        dropdown.setGuiRelativePos(parent.position.x + x, parent.position.y + y);
     }
 
     private void regeneratePresetEditor() {
@@ -1182,16 +1312,16 @@ public class GuiEditWorld extends GuiScreen {
             FlatLayerInfo info = fli.get(i);
             final int finalI = i;
             WButton block = new WButton(new Rectangle(curX + 12, curY, 20, 28), "", false, 0, null, null);
-            Block gameBlock = info.func_151536_b();
-            int blockMeta = info.getFillBlockMeta();
+            Block gameBlock = info.getLayerMaterial().getBlock();
+            int blockMeta = gameBlock.getMetaFromState(info.getLayerMaterial());
             block.enabled = false;
-            if (gameBlock == null || gameBlock == Blocks.air) {
+            if (gameBlock == null || gameBlock == Blocks.AIR) {
                 block.setText("-");
                 WLabel airCount = new WLabel(0, 18, Integer.toString(info.getLayerCount()), false);
                 airCount.color = 0xFFFFFF;
                 airCount.position.x = Math.max(0, block.position.width - airCount.position.width - 1);
                 block.addChild(airCount);
-                block.tooltip = Blocks.air.getLocalizedName();
+                block.tooltip = Blocks.AIR.getLocalizedName();
             } else {
                 block.itemStack = new ItemStack(gameBlock, 1, blockMeta);
                 block.itemStackText = Integer.toString(info.getLayerCount());
@@ -1210,31 +1340,56 @@ public class GuiEditWorld extends GuiScreen {
 
             if (i < fli.size() - 1) {
                 block.addChild(new WButton(new Rectangle(-12, 0, 10, 10), "", false, 0, Icons.SMALL_UP, () -> {
-                    Collections.swap(this.desiredConfig.getMutableLayers(), finalI, finalI + 1);
+                    List<FlatLayerInfo> layers = this.desiredConfig.getMutableLayers();
+                    if (finalI < 0 || finalI + 1 >= layers.size()) {
+                        DebugLog.log("ignored stale move-up button index=%d size=%d", finalI, layers.size());
+                        this.regeneratePresetEditor();
+                        return;
+                    }
+                    Collections.swap(layers, finalI, finalI + 1);
                     this.configToPreset();
                 }));
             }
             block.addChild(new WButton(new Rectangle(-12, 9, 10, 10), "", false, 0, Icons.SMALL_CROSS, () -> {
-                this.desiredConfig.getMutableLayers().remove(finalI);
+                List<FlatLayerInfo> layers = this.desiredConfig.getMutableLayers();
+                if (finalI < 0 || finalI >= layers.size()) {
+                    DebugLog.log("ignored stale remove button index=%d size=%d", finalI, layers.size());
+                    this.regeneratePresetEditor();
+                    return;
+                }
+                layers.remove(finalI);
                 this.configToPreset();
             }));
             if (i > 0) {
                 block.addChild(new WButton(new Rectangle(-12, 18, 10, 10), "", false, 0, Icons.SMALL_DOWN, () -> {
-                    Collections.swap(this.desiredConfig.getMutableLayers(), finalI, finalI - 1);
+                    List<FlatLayerInfo> layers = this.desiredConfig.getMutableLayers();
+                    if (finalI <= 0 || finalI >= layers.size()) {
+                        DebugLog.log("ignored stale move-down button index=%d size=%d", finalI, layers.size());
+                        this.regeneratePresetEditor();
+                        return;
+                    }
+                    Collections.swap(layers, finalI, finalI - 1);
                     this.configToPreset();
                 }));
             }
             IntConsumer plusMinus = (mul) -> {
-                FlatLayerInfo orig = this.desiredConfig.getMutableLayers().get(finalI);
+                List<FlatLayerInfo> layers = this.desiredConfig.getMutableLayers();
+                if (finalI < 0 || finalI >= layers.size()) {
+                    DebugLog.log("ignored stale layer count button index=%d size=%d", finalI, layers.size());
+                    this.regeneratePresetEditor();
+                    return;
+                }
+                FlatLayerInfo orig = layers.get(finalI);
                 boolean shiftHeld = Keyboard.isKeyDown(Keyboard.KEY_LSHIFT);
                 boolean ctrlHeld = Keyboard.isKeyDown(Keyboard.KEY_LCONTROL);
                 int newCnt = ctrlHeld ? 64 : (shiftHeld ? 10 : 1);
                 newCnt *= mul;
-                newCnt = MathHelper.clamp_int(orig.getLayerCount() + newCnt, 1, 255);
-                this.desiredConfig.getMutableLayers()
-                        .set(finalI, new FlatLayerInfo(newCnt, orig.func_151536_b(), orig.getFillBlockMeta()));
-                this.desiredConfig.setLayers(this.desiredConfig.getLayersAsString());
+                newCnt = MathHelper.clamp(orig.getLayerCount() + newCnt, 1, 255);
+                layers.set(finalI, new FlatLayerInfo(3, newCnt, orig.getLayerMaterial().getBlock(), orig.getLayerMaterial().getBlock().getMetaFromState(orig.getLayerMaterial())));
+                DebugLog.log("layer count button index=%d old=%d new=%d layers=%s", finalI, orig.getLayerCount(), newCnt, this.desiredConfig.getLayersAsString());
+                // The list is already the source of truth. Re-parsing its string form can produce an empty list.
                 this.configToPreset();
+                this.regeneratePresetEditor();
             };
             block.addChild(
                     new WButton(
@@ -1264,15 +1419,17 @@ public class GuiEditWorld extends GuiScreen {
         if (fli.size() <= MAX_VISIBLE_LAYERS) {
             layerListScrollOffset = 0;
         } else {
-            layerListScrollOffset = MathHelper.clamp_int(layerListScrollOffset, 0, fli.size() - MAX_VISIBLE_LAYERS);
+            layerListScrollOffset = MathHelper.clamp(layerListScrollOffset, 0, fli.size() - MAX_VISIBLE_LAYERS);
         }
     }
 
     private void configToPreset() {
         String preset = this.desiredConfig.getFullPresetString();
+        DebugLog.log("config to preset layers=%s full=%s", this.desiredConfig.getLayersAsString(), preset);
         if (preset == null || preset.isEmpty()) {
             preset = voidPresetName;
         }
+        this.lastGeneratedPresetText = preset;
         if (!preset.equals(this.presetEntry.textField.getText())) {
             this.presetEntry.textField.setText(preset);
             this.presetEntry.textField.setCursorPositionZero();
@@ -1289,7 +1446,7 @@ public class GuiEditWorld extends GuiScreen {
         int scrollableRange = trackH - thumbH;
         if (scrollableRange <= 0) return;
         int relY = mouseY - trackY - thumbH / 2;
-        float ratio = MathHelper.clamp_float((float) relY / scrollableRange, 0, 1);
+        float ratio = MathHelper.clamp((float) relY / scrollableRange, 0, 1);
         layerListScrollOffset = Math.round(ratio * maxScroll);
     }
 
@@ -1305,9 +1462,9 @@ public class GuiEditWorld extends GuiScreen {
         Icons.bindTexture();
         Icons.GUI_BG.draw9Patch(-8, -8, xSize + 16, ySize + 16);
 
-        int skyR = MathHelper.clamp_int(skyRed.getValueInt(), 0, 255);
-        int skyG = MathHelper.clamp_int(skyGreen.getValueInt(), 0, 255);
-        int skyB = MathHelper.clamp_int(skyBlue.getValueInt(), 0, 255);
+        int skyR = MathHelper.clamp(skyRed.getValueInt(), 0, 255);
+        int skyG = MathHelper.clamp(skyGreen.getValueInt(), 0, 255);
+        int skyB = MathHelper.clamp(skyBlue.getValueInt(), 0, 255);
         desiredConfig.setSkyColor((skyR << 16) | (skyG << 8) | skyB);
         desiredConfig.setStarBrightness((float) this.starBrightness.getValue());
         boolean generationEnabled = desiredConfig.getAllowGenerationChanges();
@@ -1329,40 +1486,44 @@ public class GuiEditWorld extends GuiScreen {
         this.biomeEditButton.buttonIcon = generationEnabled ? Icons.PENCIL : Icons.LOCK;
         this.presetEntry.enabled = generationEnabled;
 
-        this.boundaryBlockADropdown.enabled = generationEnabled;
-        this.boundaryBlockBDropdown.enabled = generationEnabled;
+        this.boundaryBlockADropdown.enabled = true;
+        this.boundaryBlockBDropdown.enabled = true;
 
-        this.boundaryChunkXMinus.enabled = generationEnabled;
-        this.boundaryChunkXPlus.enabled = generationEnabled;
-        this.boundaryChunkZMinus.enabled = generationEnabled;
-        this.boundaryChunkZPlus.enabled = generationEnabled;
-        this.boundaryChunkXField.enabled = generationEnabled;
-        this.boundaryChunkZField.enabled = generationEnabled;
+        this.boundaryChunkXMinus.enabled = true;
+        this.boundaryChunkXPlus.enabled = true;
+        this.boundaryChunkZMinus.enabled = true;
+        this.boundaryChunkZPlus.enabled = true;
+        this.boundaryChunkXField.enabled = true;
+        this.boundaryChunkZField.enabled = true;
 
-        this.gapWidthMinus.enabled = generationEnabled;
-        this.gapWidthPlus.enabled = generationEnabled;
-        this.gapWidthField.enabled = generationEnabled;
-        this.gapPresetButton.enabled = generationEnabled;
+        this.gapWidthMinus.enabled = true;
+        this.gapWidthPlus.enabled = true;
+        this.gapWidthField.enabled = true;
+        this.gapPresetButton.enabled = true;
         boolean gapIsSolid = desiredConfig.getGapPreset() == DimensionConfig.GapPreset.SOLID;
         boolean boundaryIsZero = desiredConfig.getBoundaryChunkIntervalX() == 0
                 && desiredConfig.getBoundaryChunkIntervalZ() == 0;
-        boolean gapEnabled = generationEnabled && !boundaryIsZero;
+        boolean gapEnabled = true;
         this.gapWidthMinus.enabled = gapEnabled;
         this.gapWidthPlus.enabled = gapEnabled;
         this.gapWidthField.enabled = gapEnabled;
         this.gapPresetButton.enabled = gapEnabled;
+        this.roadAreaField.enabled = gapEnabled && !gapIsSolid;
         this.gapBlockADropdown.enabled = gapEnabled && !gapIsSolid;
         this.gapBlockBDropdown.enabled = gapEnabled && !gapIsSolid;
         this.gapBlockCDropdown.enabled = gapEnabled && !gapIsSolid;
-        this.applyToAllSurfaceLayersToggle.enabled = generationEnabled;
+        this.applyToAllSurfaceLayersToggle.enabled = true;
+        this.overwriteFirstLayerToggle.enabled = true;
+        this.moreSettingsButton.enabled = !this.tile.active;
 
-        boolean centerCanEnable = generationEnabled && !boundaryIsZero;
+        boolean centerCanEnable = !boundaryIsZero;
         this.centerEnabledToggle.enabled = centerCanEnable;
         boolean centerActive = centerCanEnable && desiredConfig.isCenterEnabled();
         this.centerDirectionButton.enabled = centerActive;
         this.centerBlockDropdown.enabled = centerActive;
 
         String actualText = this.presetEntry.textField.getText();
+        boolean presetChangedByUser = !actualText.equals(this.lastGeneratedPresetText);
         if (voidPresetName.equals(actualText)) {
             actualText = "";
         }
@@ -1380,8 +1541,10 @@ public class GuiEditWorld extends GuiScreen {
         } else {
             this.presetEntry.textField.setTextColor(0xA0FFA0);
             this.presetEntry.tooltip = null;
-            this.desiredConfig.setLayers(layersPart);
-            if (DimensionConfig.hasExtendedSettings(actualText)) {
+            if (presetChangedByUser) {
+                this.desiredConfig.setLayers(layersPart);
+            }
+            if (DimensionConfig.hasExtendedSettings(actualText) && presetChangedByUser) {
                 this.desiredConfig.applyExtendedSettings(actualText);
                 // Only overwrite UI fields that the user is not actively editing.
                 this.syncExtendedInputsFromDesiredConfig();
@@ -1389,7 +1552,10 @@ public class GuiEditWorld extends GuiScreen {
                 updateGapButtons();
                 updateApplyToAllSurfaceLayersButton();
                 updateCenterButtons();
-            } else {
+            } else if (presetChangedByUser) {
+                // A manually-entered layers-only preset intentionally resets extended options.
+                // Do not clear them during ordinary redraws: configToPreset() serializes the
+                // current options, so its generated text is not a user edit.
                 clearExtendedPresetInputs();
             }
             this.regeneratePresetEditor();
@@ -1398,12 +1564,13 @@ public class GuiEditWorld extends GuiScreen {
         int prevBoundaryChunkX = this.desiredConfig.getBoundaryChunkIntervalX();
         int prevBoundaryChunkZ = this.desiredConfig.getBoundaryChunkIntervalZ();
         int prevGapWidth = this.desiredConfig.getGapWidth();
+        int prevRoadArea = this.desiredConfig.getRoadAreaChunks();
 
         this.desiredConfig.setBiomeId(this.biome.textField.getText());
         if (!generationEnabled) {
             this.biome.textField.setTextColor(0x909090);
-        } else if (BiomeGenBase.getBiome(this.desiredConfig.getRawBiomeId()) == null || !this.desiredConfig.getBiomeId()
-                .equalsIgnoreCase(BiomeGenBase.getBiome(this.desiredConfig.getRawBiomeId()).biomeName)) {
+        } else if (Biome.getBiome(this.desiredConfig.getRawBiomeId()) == null || !this.desiredConfig.getBiomeId()
+                .equalsIgnoreCase(Biome.getBiome(this.desiredConfig.getRawBiomeId()).getBiomeName())) {
                     this.biome.textField.setTextColor(0xFF0000);
                     this.biome.tooltip = I18n.format("gui.personalWorld.invalidSyntax");
                     inputsValid = false;
@@ -1457,6 +1624,21 @@ public class GuiEditWorld extends GuiScreen {
             // Gap validation - skip when boundary is 0x0
             boolean gapBoundaryZero = desiredConfig.getBoundaryChunkIntervalX() == 0
                     && desiredConfig.getBoundaryChunkIntervalZ() == 0;
+            if (desiredConfig.getGapPreset() == DimensionConfig.GapPreset.ROAD) {
+                int ra = parseIntOrDefault(
+                        this.roadAreaField.textField.getText(),
+                        this.desiredConfig.getRoadAreaChunks());
+                boolean raOk = ra >= 1 && ra <= DimensionConfig.MAX_ROAD_AREA_CHUNKS;
+                if (!raOk) {
+                    this.roadAreaField.textField.setTextColor(0xFF0000);
+                    this.roadAreaField.tooltip = I18n.format("gui.personalWorld.road.areaRange");
+                    inputsValid = false;
+                } else {
+                    this.roadAreaField.textField.setTextColor(0xA0FFA0);
+                    this.roadAreaField.tooltip = I18n.format("gui.personalWorld.road.areaRange");
+                    this.desiredConfig.setRoadAreaChunks(ra);
+                }
+            }
             if (!gapBoundaryZero) {
                 int gw = parseIntOrDefault(this.gapWidthField.textField.getText(), 0);
                 boolean gwOk = gw >= 0 && gw <= 5;
@@ -1498,14 +1680,25 @@ public class GuiEditWorld extends GuiScreen {
                 updateCenterButtons();
             }
 
-            this.syncPresetFromExtendedInputsIfChanged(prevBoundaryChunkX, prevBoundaryChunkZ, prevGapWidth);
+            this.syncPresetFromExtendedInputsIfChanged(prevBoundaryChunkX, prevBoundaryChunkZ, prevGapWidth,
+                    prevRoadArea);
         } else {
             this.boundaryChunkXField.textField.setTextColor(0x909090);
             this.boundaryChunkZField.textField.setTextColor(0x909090);
             this.gapWidthField.textField.setTextColor(0x909090);
+            this.roadAreaField.textField.setTextColor(0x909090);
         }
 
-        this.save.enabled = inputsValid;
+        boolean layersValid = !desiredConfig.getLayers().isEmpty()
+                && DimensionConfig.canUseLayers(desiredConfig.getLayersAsString(), true);
+        if (!layersValid) {
+            DebugLog.log("frame validation failed layers=%s parsedCount=%d clientRules=%s",
+                    desiredConfig.getLayersAsString(), desiredConfig.getLayers().size(), PersonalSpaceMod.clientAllowedBlocks);
+        }
+        this.save.enabled = inputsValid && layersValid;
+        if (previewPanel != null) {
+            previewPanel.setConfig(desiredConfig);
+        }
 
         rootWidget.draw(mouseX, mouseY, partialTicks);
 
@@ -1549,7 +1742,7 @@ public class GuiEditWorld extends GuiScreen {
     }
 
     @Override
-    protected void keyTyped(char character, int key) {
+    protected void keyTyped(char character, int key) throws IOException {
         // If dropdown is open, forward key events to its search box
         if (WBlockDropdown.isAnyDropdownOpen()) {
             if (key == Keyboard.KEY_ESCAPE) {
@@ -1564,7 +1757,7 @@ public class GuiEditWorld extends GuiScreen {
     }
 
     @Override
-    protected void mouseClicked(int x, int y, int button) {
+    protected void mouseClicked(int x, int y, int button) throws IOException {
         x -= guiLeft;
         y -= guiTop;
         // Handle dropdown click first (overlay is on top)
@@ -1588,15 +1781,15 @@ public class GuiEditWorld extends GuiScreen {
     }
 
     @Override
-    protected void mouseMovedOrUp(int x, int y, int button) {
+    protected void mouseReleased(int x, int y, int button) {
         x -= guiLeft;
         y -= guiTop;
         WBlockDropdown.handleOpenDropdownMouseUp();
         if (button >= 0) {
             layerScrollbarDragging = false;
         }
-        super.mouseMovedOrUp(x, y, button);
         rootWidget.mouseMovedOrUp(x, y, button);
+        super.mouseReleased(x, y, button);
     }
 
     @Override
@@ -1615,7 +1808,7 @@ public class GuiEditWorld extends GuiScreen {
     }
 
     @Override
-    public void handleMouseInput() {
+    public void handleMouseInput() throws IOException {
         super.handleMouseInput();
         int delta = Mouse.getEventDWheel();
         if (delta != 0) {

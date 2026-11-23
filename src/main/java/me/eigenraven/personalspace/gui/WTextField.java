@@ -14,7 +14,7 @@ public class WTextField extends Widget {
 
     public WTextField(Rectangle position, String text) {
         this.position = position;
-        textField = new GuiTextField(Minecraft.getMinecraft().fontRenderer, 0, 0, position.width, position.height);
+        textField = new GuiTextField(0, Minecraft.getMinecraft().fontRenderer, 0, 0, position.width, position.height);
         textField.setMaxStringLength(4096);
         textField.setText(text);
     }

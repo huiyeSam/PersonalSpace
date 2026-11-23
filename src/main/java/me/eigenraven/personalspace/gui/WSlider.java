@@ -7,7 +7,7 @@ import javax.annotation.Nonnull;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
-import net.minecraft.util.MathHelper;
+import net.minecraft.util.math.MathHelper;
 
 import org.lwjgl.opengl.GL11;
 
@@ -52,7 +52,7 @@ public class WSlider extends Widget {
     }
 
     public double value01() {
-        return MathHelper.clamp_double((rawValue - minValue) / Math.max(maxValue - minValue, 1.0e-6), 0, 1);
+        return MathHelper.clamp((rawValue - minValue) / Math.max(maxValue - minValue, 1.0e-6), 0, 1);
     }
 
     @Nonnull
@@ -100,7 +100,7 @@ public class WSlider extends Widget {
     }
 
     private void updateValueFromMouse(int x) {
-        double newVal01 = MathHelper.clamp_double((double) (x - position.x - 3) / (double) (position.width - 6), 0, 1);
+        double newVal01 = MathHelper.clamp((double) (x - position.x - 3) / (double) (position.width - 6), 0, 1);
         double newVal = minValue + (newVal01 * (maxValue - minValue));
         double oldVal = rawValue;
         rawValue = newVal;
